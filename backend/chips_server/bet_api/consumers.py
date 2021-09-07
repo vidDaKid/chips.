@@ -8,7 +8,6 @@ class GameConsumer(AsyncWebsocketConsumer):
     # Game State information
     games = defaultdict(lambda: {
             'status': list([1,1]), # 0=busy,1=active // [ordering,voting]
-            'to_play':'', # Who's turn it currently is to bet
             'round': {
                 'betting_round':0, # Rounds 0,1,2,3 for pre-flop -> river
                 'pot': 0, # total_pot_size:int
@@ -17,6 +16,8 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'starting_player':0, # starting player
                 'current_player':0, # current_playing_player
                 'players':defaultdict(int), # {'player':curr_bet}
+                'player_order': list(),
+                'all_in': list(), # List of players who are all_in
             },
             'players':defaultdict(lambda: {'chips':0,'position':-1}),
             'settings':dict()
@@ -136,10 +137,19 @@ class GameConsumer(AsyncWebsocketConsumer):
             if self._has_params(action, ['play', 'game_id']):
                 play = action['play']
                 game_id = action['game_id']
-            if play=='bet':
-                self.play_bet(game_id)
             else:
+                await self._send_fail_message('Need a `play` action and a `game_id`')
+            if play=='bet':
+                if self._has_params(action, ['amount']):
+                    amount = action['amount']
+                    self.play_bet(game_id, amount)
+                else:
+                    await self._send_fail_message('Need to include amount with a bet')
+                    return
+            elif play == ('check' or 'fold'):
                 self.play(game_id, play)
+            else:
+                await self._send_fail_message('Play can only be bet, check, or fold')
 
         ## TEST
         elif action['type']=='GAMES':
@@ -251,13 +261,17 @@ class GameConsumer(AsyncWebsocketConsumer):
         # If this si the last player, spit out the order to everyone
         if position+1 == len(self.games[game_id]['players'].keys()):
             order = sorted(self.games[game_id]['players'].keys(), key=lambda x: self.games[game_id]['players'][x]['position'])
-            order = [self.players[x]['name'] for x in order]
+            name_order = [self.players[x]['name'] for x in order]
+            # Also update the current round players (put them in order)
+            for player in order:
+                self.games[game_id]['round']['players'][player] = 0
+                self.games[game_id]['round']['player_order'].append(player)
             await self.channel_layer.group_send(
                 game_id,
                 {
                     'type':'announce_order',
                     'game_id':game_id,
-                    'order':order
+                    'order':name_order
                 }
             )
             # Free up game space
@@ -291,18 +305,62 @@ class GameConsumer(AsyncWebsocketConsumer):
     ### BETTING ###
     ## Play a check or a fold
     async def play(self, game_id:str, play:str):
-        betting_round, _, _, max_bet, starting_player, _, players = self.get_round_info(game_id)
+        betting_round, _, _, max_bet, _, current_player, players, player_order = self.get_round_info(game_id)
         if max_bet!=0 and play=='check':
             await self._send_fail_message('Cannot check if bet is not 0')
             return
+        # Make sure betting player is who is supposed to play
+        if self.channel_name != player_order[current_player]:
+            await self._send_fail_message('It is not your turn to play')
+            return
+        # Handle fold
         if play=='fold':
-            # self.g
+            self.games[game_id]['round']['players'].__delitem__(self.channel_name)
             pass
+        # Handle check
+        if play=='check':
+            self.advance_bet()
 
+    ## Play a bet
+    async def play_bet(self, game_id:str, amount:int):
+        betting_round, pot, side_pots, max_bet, _, current_player, players, player_order, all_in = self.get_round_info(game_id)
+        bet_amount = int(amount)
+        # Make sure player is up to play
+        if not (curr_p:=player_order[current_player]) == self.channel_name:
+            await self._send_fail_message('It is not your turn to play')
+            return
+        # Make sure player has enough to bet
+        if bet_amount > self.games[game_id]['players'][curr_p]['chips']:
+            await self._send_fail_message('You do not have enough chips to bet that much')
+            return
+        # Make sure the bet is big enough (dont check for doubling on the raise for now)
+        if bet_amount < max_bet:
+            await self._send_fail_message(f'Bet must be at least equal to the max: {max_bet}')
+            return
+        # If the bet is over the max_bet, update it
+        self.games[game_id]['round']['max_bet'] = max(max_bet,bet_amount)
+        # Update game state
+        ## Check if player is going all in
+        if bet_amount == self.games[game_id]['players'][self.channel_name]['chips']:
+            self.games[game_id]['round']['all_in'].append(self.channel_name)
+            self.games[game_id]['round']['players'].__delitem__(self.channel_name)
+        ## Add bet to pot if no one is all in
+        if all_in == []:
+            self.games[game_id]['round']['pot'] += bet_amount
+            # Add bet amount to player dict
+            self.games[game_id]['round']['players'][self.channel_name] += bet_amount
+        else:
+            # Hash a tuple of the players in order and add the pot amount
+            self.games[game_id]['round']['side_pots'][tuple(players.keys())] += bet_amount
+        # Take money out of personal chips
+        self.games[game_id]['players'][self.channel_name]['chips'] -= bet_amount
+        await self.advance_bet()
+
+        
     # Helper Functions
     ## Move forward 1 betting round (if betting_round==3 (river), start next round) 
     async def advance_betting_round(self, game_id):
-        betting_round, _, _, max_bet, starting_player, _, players = self.get_round_info(game_id)
+        betting_round, _, _, max_bet, starting_player, _, players, player_order,_ = self.get_round_info(game_id)
         if int(betting_round) == 3:
             # CALL ADVANCE ROUND FUNCTION
             return
@@ -322,14 +380,33 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.send(json.dumps({'status':'ok','body':{
                 'current_player':new_curr_player
         }}))
+    
+    ## Advance from current better to the next
+    async def advance_bet(self, game_id:str):
+        _,_,_,max_bet,starting_player,current_player,players,player_order,_ = self.get_round_info(game_id)
+        # If current player is in round & hasn't bet enough throw an error
+        if (curr_player:=player_order[current_player]) in players and (
+                player[curr_player] < max_bet
+        ):
+            await self._send_fail_message('Current Player has not bet enough')
+        # Otherwise update the game state
+        if current_player == len(player_order)-1:
+            # If ur the last player, check the starting player & if the best is good 
+            # go to the next round
+            if players[player_order[starting_player]]==max_bet:
+                await self.advance_betting_round(game_id)
+                return
+            else:
+                self.games[game_id]['round']['current_player'] = starting_player
+        else:
+            self.games[game_id]['round']['current_player'] = current_player+1
             
-
     
     ## Get and send all round information
     def get_round_info(self, game_id:str):
         bet_round = self.games[game_id]['round']
-        betting_round, pot, side_pots, max_bet, starting_player, current_player, players = bet_round.values()
-        return betting_round, pot, side_pots, max_bet, starting_player, current_player, players
+        betting_round, pot, side_pots, max_bet, starting_player, current_player, players, player_order, all_in = bet_round.values()
+        return betting_round, pot, side_pots, max_bet, starting_player, current_player, players, player_order, all_in
 
     ''' ANNOUNCEMENTS '''
     # Announces to all the clients that we are starting the ordering process

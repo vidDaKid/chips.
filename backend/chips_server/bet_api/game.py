@@ -73,14 +73,14 @@ class Game:
     # BET FUNCTIONS
     def place_bet(self, channel:str, bet_size:int) -> None:
         if bet_size == (cc := self.players[channel].c_count):
-            self.round.place_all_in_bet(channel, bet_size)
+            self.round.place_all_in_bet(self.get_player(channel), bet_size)
         elif bet_size > cc:
             raise ValueError('The bet size is larger than the amount of chips you have')
         else:
-            self.round.place_bet(channel, bet_size)
+            self.round.place_bet(self.get_player(channel), bet_size)
 
     def fold(self, channel:str) -> None:
-        self.round.fold(channel)
+        self.round.fold(self.get_player(channel))
 
     # PLAYER FUNCTIONS
     def order_players(self) -> None:

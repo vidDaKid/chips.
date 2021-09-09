@@ -140,32 +140,42 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.count_bool_vote(game_id, vote)
         ## Play turn
         elif action['type']=='PLAY':
-            # Action should have an attribute 'play' that denotes whether its a bet, check, or fold
-            if self._has_params(action, ['play', 'game_id']):
-                play = action['play']
-                game_id = action['game_id']
-            else:
+            # Action should have an attribute 'play' that denotes whether its a bet or fold
+            if not self._has_params(action, ['play', 'game_id']):
                 await self._send_fail_message('Need a `play` action and a `game_id`')
                 return
+            play = action['play']
+            game_id = action['game_id']
+            amount = action['amount'] if action.__contains__('amount') else None
+            await self.play(play=play, game_id=game_id, bet_size=amount)
+            return
+
             # Make sure game_id exists
-            if not self._game_exists(game_id):
-                await self._send_fail_message('The game ID you provided does not exist')
-            # get the game if it exists
-            game = self.games[game_id]
-            if play=='bet':
-                if self._has_params(action, ['amount']):
-                    amount = action['amount']
-                    # self.play_bet(game_id, amount)
-                    game.place_bet(channel=self.channel_name, bet_size=amount)
-                    ''' ADD ANNOUNCEMENT ABOUT WHAT JUST HAPPENED HERE AND FOR FOLD '''
-                else:
-                    await self._send_fail_message('Need to include amount with a bet')
-                    return
-            elif play == 'fold':
-                # self.play(game_id, play)
-                game.fold()
-            else:
-                await self._send_fail_message('Play can only be bet, check, or fold')
+            # if not self._game_exists(game_id):
+                # await self._send_fail_message('The game ID you provided does not exist')
+            # # get the game if it exists
+            # game = self.games[game_id]
+            # if play=='bet':
+                # if not self._has_params(action, ['amount']):
+                    # await self._send_fail_message('Need to include amount with a bet')
+                    # return
+                # amount = action['amount']
+                # # self.play_bet(game_id, amount)
+                # game.place_bet(channel=self.channel_name, bet_size=amount)
+                # ''' ADD ANNOUNCEMENT ABOUT WHAT JUST HAPPENED HERE AND FOR FOLD '''
+                # await self.channel_layer.group_send(
+                    # game_id,
+                    # {
+                        # 'type':'announce_bet',
+                        # 'game_id':game_id,
+                        # 'amount':amount,
+                    # }
+                # )
+            # elif play == 'fold':
+                # # self.play(game_id, play)
+                # game.fold()
+            # else:
+                # await self._send_fail_message('Play can only be bet or fold')
 
         ## TEST
         # elif action['type']=='GAMES':
@@ -175,6 +185,35 @@ class GameConsumer(AsyncWebsocketConsumer):
         return
 
     ''' FUNCTIONALITY '''
+    ## Betting
+    async def play(self, play:str, game_id:str, bet_size:int=None):
+        if not self._game_exists(game_id):
+            await self._send_fail_message('The game ID you provided does not exist')
+            return
+        game = self.games[game_id]
+        if play == 'bet':
+            if bet_size is None:
+                await self._send_fail_message('Bet must include a bet size')
+                return
+            try:
+                game.place_bet(channel=self.channel_name, bet_size=bet_size)
+            except ValueError as e:
+                await self._send_fail_message(e)
+                return
+            else:
+                await self.channel_layer.group_send(
+                    game_id,
+                    {
+                        'type':'announce_bet',
+                        'game_id':game_id,
+                        'bet_size':bet_size,
+                    }
+                )
+        elif play == 'fold':
+            game.fold(channel=self.channel_name)
+        else:
+            await self._send_fail_message('`play` can only be bet or check')
+
     ## CREATE GAME   
     async def new_game(self, settings:dict[str and int]=None):
         # settings = settings or {'default_count':'200','big_blind':'4'}
@@ -549,6 +588,11 @@ class GameConsumer(AsyncWebsocketConsumer):
         game = self.games[game_id]
         game.reset_voting()
         game.set_voting_free()
+
+    # Announce to everyone else when someone makes a bet so their clients update
+    async def announce_bet(self, event):
+        game_id, bet_size = event['game_id'], event['bet_size']
+
 
     ''' USEFUL FUNCTIONS '''
     def _verify_player_in_game(self, channel:str, game_id:str):

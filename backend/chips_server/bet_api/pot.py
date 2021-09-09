@@ -107,8 +107,10 @@ class Pots:
         return output
 
     def __add__(self, *args, **kwargs):
-        return 'Error: cannot create new instance of game state, use `+=` to update or `print()` to get current state'
+        raise ValueError('Error: cannot create new instance of game state, use `+=` to update or `print()` to get current state')
 
     def __iadd__(self, o:int):
+        if not (type(o) == int):
+            raise TypeError('Can only add integer values to pot')
         self._add_safe(o, False)
         return self

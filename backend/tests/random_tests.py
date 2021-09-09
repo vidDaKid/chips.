@@ -24,37 +24,83 @@ def make_action(typ,*args,**kwargs) -> 'json(dict)':
         d[x] = y
     return json.dumps(d)
 
-def test_count(name:str, create:bool=False, game_id:str=None):
-    ws = WebSocket()
-    ws.connect(LINK)
-    ws.recv()
-    if create==True:
-        ws.send(make_action('CREATE'))
-        game = ws.recv()
-        print('Created Game')
-        game = json.loads(game)
-        if game['status']=='ok':
-            game_id = game['body']['game_id']
-        else:
-            print(game['message'])
-        print(f'{game_id=}')
-    else:
-        if not game_id:
-            print('Add Game ID To Join')
-            return
-    ws.send(make_action('JOIN',game_id=game_id, name=name))
-    print(ws.recv())
-    # if create==True:
-        # ws.send(make_action('ORDER',game_id=game_id))
-        # print(ws.recv())
-    # count_me(ws, game_id)
+def test_create(ws=None):
+    if not ws:
+        ws = WebSocket()
+        ws.connect(LINK)
+        # ws.recv()
+    ws.send(make_action('CREATE'))
+    game = ws.recv()
+    print('='*8, 'CREATED GAME', '='*8)
+    print(game)
+    # return game['game_id']
     return ws
+
+def test_join(game_id:str, name:str='vee', ws=None):
+    if not ws:
+        ws = WebSocket()
+        ws.connect(LINK)
+    ws.send(make_action('JOIN',name=name,game_id=game_id))
+    info = ws.recv()
+    print(info)
+    return ws
+
+def test_order(ws:'WebSocket', game_id:str):
+    ws.send(make_action('ORDER', game_id=game_id))
+    return ws
+
+def start_vote(ws:'WebSocket', game_id:str, vote_param:str):
+    ws.send(make_action('START_VOTE',game_id=game_id,voting_param=vote_param))
+    return ws
+
+def cast_vote(ws:'WebSocket', game_id:str, vote:bool):
+    ws.send(make_action('VOTE',game_id=game_id,vote=vote))
+    return ws
+
+# def test_full_vote(create:bool=False, game_id:str=None,name:str='vee'):
+    # ws = WebSocket()
+    # ws.connect(LINK)
+    # if create:
+        # game_id = test_create(ws)
+        # print(game_id)
+    # ws = test_join(ws=ws,game_id=game_id,name=name)
+
+# def send_count(ws:'WebSocket', game_id:str):
+    # ws.send(make_action('COUNT', game_id=game_id))
+    # return ws
+# 
+# def test_count(name:str, create:bool=False, game_id:str=None):
+    # ws = WebSocket()
+    # ws.connect(LINK)
+    # ws.recv()
+    # if create==True:
+        # ws.send(make_action('CREATE'))
+        # game = ws.recv()
+        # print('Created Game')
+        # game = json.loads(game)
+        # if game['status']=='ok':
+            # game_id = game['body']['game_id']
+        # else:
+            # print(game['message'])
+        # print(f'{game_id=}')
+    # else:
+        # if not game_id:
+            # print('Add Game ID To Join')
+            # return
+    # ws.send(make_action('JOIN',game_id=game_id, name=name))
+    # print(ws.recv())
+    # # if create==True:
+        # # ws.send(make_action('ORDER',game_id=game_id))
+        # # print(ws.recv())
+    # # count_me(ws, game_id)
+    # return ws
 
 def order(ws, game_id):
     ws.send(make_action('ORDER',game_id=game_id))
     print(ws.recv())
+    return ws
 
 def count(ws, game_id:str):
     ws.send(make_action('COUNT', game_id=game_id))
     print(ws.recv())
-    return
+    return ws

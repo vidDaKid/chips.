@@ -2,49 +2,58 @@ import json, time, random, math
 from collections import defaultdict
 from typing import List
 from channels.generic.websocket import AsyncWebsocketConsumer
+from bet_api.game import Game
 
+''' TEMPORARY DEBUG VARIABLE '''
+DEBUG = True
 
 class GameConsumer(AsyncWebsocketConsumer):
     # Game State information
-    games = defaultdict(lambda: {
-            'status': list([1,1]), # 0=busy,1=active // [ordering,voting]
-            'round': {
-                'betting_round':0, # Rounds 0,1,2,3 for pre-flop -> river
-                'pot': 0, # total_pot_size:int
-                'side_pots': defaultdict(int), # {(players_in_side_pot,):side_pot_size}
-                'max_bet': 0, # Increase the max bet whenever someone bets
-                'starting_player':0, # starting player
-                'current_player':0, # current_playing_player
-                'players':defaultdict(int), # {'player':curr_bet}
-                'player_order': list(),
-                'all_in': list(), # List of players who are all_in
-            },
-            'players':defaultdict(lambda: {'chips':0,'position':-1}),
-            'settings':dict()
-    }) # {game_id: {'pot':pot_count,'order/chips':{'player1':chipcount}, 'settings': {x:user_input for x in settings}},}
-    players = defaultdict(lambda: {'name':'', 'games':list()})
-    settings = ['default_count', 'big_blind']
-    count = defaultdict(int) # Keeps track of count to order players
+    # games = defaultdict(lambda: {
+            # 'status': list([1,1]), # 0=busy,1=active // [ordering,voting]
+            # 'round': {
+                # 'betting_round':0, # Rounds 0,1,2,3 for pre-flop -> river
+                # 'pot': 0, # total_pot_size:int
+                # 'side_pots': defaultdict(int), # {(players_in_side_pot,):side_pot_size}
+                # 'max_bet': 0, # Increase the max bet whenever someone bets
+                # 'starting_player':0, # starting player
+                # 'current_player':0, # current_playing_player
+                # 'players':defaultdict(int), # {'player':curr_bet}
+                # 'player_order': list(),
+                # 'all_in': list(), # List of players who are all_in
+            # },
+            # 'players':defaultdict(lambda: {'chips':0,'position':-1}),
+            # 'settings':dict()
+    # }) # {game_id: {'pot':pot_count,'order/chips':{'player1':chipcount}, 'settings': {x:user_input for x in settings}},}
+    player_games = defaultdict(str) # Each player is connected to a list of their games
+    # settings = ['default_count', 'big_blind']
+    # count = defaultdict(int) # Keeps track of count to order players
     votes = defaultdict(list) # Keeps track of votes for each game
+    games = defaultdict(Game)
+    game_id = ''
 
     async def connect(self):
         # Defautl accept the connection for now
         await self.accept()
 
-        await self.send(self.channel_name)
-        print('CONNECTED to new socket client')
+        # await self.send(self.channel_name)
+        if DEBUG:
+            print('CONNECTED to new socket client')
 
         return
 
     async def disconnect(self, close_code):
         # Find all the games the player was in and eliminate the player
         # await self._send_fail_message(self.channel_name)
-        p_games = self.players[self.channel_name]['games']
-        for game_id in p_games:
-            self.games[game_id]['players'].__delitem__(self.channel_name)
+
+        game = self.player_games[self.channel_name]
+            # do something w the game (like set them inactive) if u want
+
+        # for game_id in p_games:
+            # self.games[game_id]['players'].__delitem__(self.channel_name)
             # deactivate game if last person leaves
-            if len(self.games[game_id]['players'])==0:
-                self.games.__delitem__(game_id)
+            # if len(self.games[game_id]['players'])==0:
+                # self.games.__delitem__(game_id)
         return
 
     # Receive action from client and send it to the game
@@ -67,29 +76,27 @@ class GameConsumer(AsyncWebsocketConsumer):
         # ACTION SPACE
         ## Create new game
         if action['type']=='CREATE':
-            settings, game_id = None, None
+            settings = None
             if self._has_params(action, ['settings']):
                 settings = action['settings']
-            if self._has_params(action, ['game_id']):
-                game_id = action['game_id']
-            await self.new_game(game_id=game_id, settings=settings)
+            await self.new_game(settings=settings)
         ## Join existing game
         elif action['type']=='JOIN':
-            try:
+            if self._has_params(action, ['name', 'game_id']):
                 name = action['name']
                 game = action['game_id']
-            except Exception as e:
-                await self.send('Need a name to join a game')
+            else:
+                await self._send_fail_message('Need a name to join a game')
                 return
             await self.join_game(game, name)
         ## Get *full* game status
-        elif action['type']=='STATUS':
-            try:
-                game_id = action['game_id']
-            except Exception:
-                await self.send(json.dumps({'status':'fail','message':'Include game_id to get game state'}))
-                return
-            await self.game_status(game_id)
+        # elif action['type']=='STATUS':
+            # try:
+                # game_id = action['game_id']
+            # except Exception:
+                # await self.send(json.dumps({'status':'fail','message':'Include game_id to get game state'}))
+                # return
+            # await self.game_status(game_id)
         ## Get order of players
         elif action['type']=='ORDER':
             if self._has_params(action, ['game_id']):
@@ -126,11 +133,11 @@ class GameConsumer(AsyncWebsocketConsumer):
         elif action['type']=='VOTE':
             if self._has_params(action, ['game_id','vote']):
                 game_id = action['game_id']
-                vote = action['vote'] #Should be 0 or 1 (string is ok)
+                vote = action['vote'] # bool
             else:
-                self._send_fail_message(f'Must have all parameters: {["game_id","vote"]}')
+                await self._send_fail_message(f'Must have all parameters: {["game_id","vote"]}')
                 return
-            await self.count_vote(game_id, vote)
+            await self.count_bool_vote(game_id, vote)
         ## Play turn
         elif action['type']=='PLAY':
             # Action should have an attribute 'play' that denotes whether its a bet, check, or fold
@@ -139,75 +146,110 @@ class GameConsumer(AsyncWebsocketConsumer):
                 game_id = action['game_id']
             else:
                 await self._send_fail_message('Need a `play` action and a `game_id`')
+                return
+            # Make sure game_id exists
+            if not self._game_exists(game_id):
+                await self._send_fail_message('The game ID you provided does not exist')
+            # get the game if it exists
+            game = self.games[game_id]
             if play=='bet':
                 if self._has_params(action, ['amount']):
                     amount = action['amount']
-                    self.play_bet(game_id, amount)
+                    # self.play_bet(game_id, amount)
+                    game.place_bet(channel=self.channel_name, bet_size=amount)
+                    ''' ADD ANNOUNCEMENT ABOUT WHAT JUST HAPPENED HERE AND FOR FOLD '''
                 else:
                     await self._send_fail_message('Need to include amount with a bet')
                     return
-            elif play == ('check' or 'fold'):
-                self.play(game_id, play)
+            elif play == 'fold':
+                # self.play(game_id, play)
+                game.fold()
             else:
                 await self._send_fail_message('Play can only be bet, check, or fold')
 
         ## TEST
-        elif action['type']=='GAMES':
-            await self.send(json.dumps(self.games))
+        # elif action['type']=='GAMES':
+            # await self.send(json.dumps(self.games))
+        else:
+            await self._send_fail_message('The action type you sent does not exist')
         return
 
     ''' FUNCTIONALITY '''
     ## CREATE GAME   
-    async def new_game(self, game_id:str=None, settings:dict=None):
-        settings = settings or {'default_count':'200','big_blind':'4'}
+    async def new_game(self, settings:dict[str and int]=None):
+        # settings = settings or {'default_count':'200','big_blind':'4'}
         # Make sure all necessary data in the event
-        if not self._has_params(settings, self.settings):
-            await self._send_fail_message(f'Include All Settings: {self.settings}')
-            return
+        # if not self._has_params(settings, self.settings):
+            # await self._send_fail_message(f'Include All Settings: {self.settings}')
+            # return
         # Check if game ID is taken // return error if it is -- May remove in production
-        if game_id and game_id in self.games:
-            await self.send(json.dumps({'status':'fail','message':'Game ID is taken'}))
-            return
+        # if game_id and game_id in self.games:
+            # await self.send(json.dumps({'status':'fail','message':'Game ID is taken'}))
+            # return
         # Create a game ID and send it back to the client
-        if not game_id:
-            while (not game_id) or game_id in self.games:
-                # Generate game IDs
-                size = 8
-                options = [chr(x) for x in range(65,91)] + list(range(10))
-                game_id = ''.join(str(random.choice(options)) for _ in range(size))
+        # if not game_id:
+        game_id:str = None
+        while (not game_id) or game_id in self.games:
+            # Generate game IDs
+            size = 8
+            options = [chr(x) for x in range(65,91)] + list(range(10))
+            game_id = ''.join(str(random.choice(options)) for _ in range(size))
         # Store new game info into the state
-        self.games[game_id]['settings'] = settings
-        await self.send(json.dumps({'status':'ok', 'body':{'game_id':game_id}}))
+        # self.games[game_id]['settings'] = settings
+        # Create the new game
+        self.games[game_id] = Game()
+        if settings:
+            self.games[game_id].update_settings(settings)
+        if DEBUG:
+            await self.send(json.dumps({'status':'ok', 'body':{'game_id':game_id}}))
         # Finally, join the game you just created // OPTIONAL (or just get name & join after on client side
         # await self.join_game(game_id, k
         return
 
 
     # JOIN GAME
-    async def join_game(self, game_id, name):
-        # Make sure name is legit
-        if not name or type(name)!=str:
-            await self.send(json.dumps({'status':'fail', 'message':'Improper Name'}))
-            return
-        # Make sure they aren't already in the game
-        if self.channel_name in self.games[game_id]['players']:
-            await self._send_fail_message('You are already in this game')
-            return
+    async def join_game(self, game_id:str, name:str):
+        # game_id = game_id or self.game_id
+        # await self.send(self.game_id)
+        # return
         # Make sure game exists
         if not self.games.__contains__(game_id):
             await self._send_fail_message('The game ID you sent is not an active game')
             return
+        
+        # Get current game
+        game = self.games[game_id]
+        # Make sure they aren't already in the game
+        if game.player_is_in_game(self.channel_name):
+            await self._send_fail_message('You are already in this game')
+            return
+        # Make sure name is legit
+        if not name or type(name)!=str:
+            await self._send_fail_message('Improper name')
+            return
+        # Make sure name is unique
+        if not game.name_is_available(name):
+            await self._send_fail_message('The name you chose is taken')
+            return
+
         # Add client to the channel
         await self.channel_layer.group_add(
             game_id,
             self.channel_name
         )
         # Add name to the names state
-        self.players[self.channel_name]['name'] = name
-        self.players[self.channel_name]['games'].append(game_id)
+        # self.players[self.channel_name]['name'] = name
+        # self.players[self.channel_name]['games'].append(game_id)
         # Add the player to the game state & give them the default number of chips
-        self.games[game_id]['players'][self.channel_name]['chips'] = int(self.games[game_id]['settings']['default_count'])
-        await self.send(json.dumps({'status':'ok', 'body':{'chip_count':self.games[game_id]['players'][self.channel_name]['chips'], 'name':name}}))
+        # self.games[game_id]['players'][self.channel_name]['chips'] = int(self.games[game_id]['settings']['default_count'])
+        # await self.send(json.dumps({'status':'ok', 'body':{'chip_count':self.games[game_id]['players'][self.channel_name]['chips'], 'name':name}}))
+
+        # Add player to game
+        game.add_player(self.channel_name, name)
+        # Get player info
+        if DEBUG:
+            info = game.get_player_info(self.channel_name)
+            await self.send(json.dumps(info))
         return
 
     # SEND CURRENT GAME STATE
@@ -226,14 +268,15 @@ class GameConsumer(AsyncWebsocketConsumer):
     # Resets the ordering and gets ready for everyone to call 'count_me'
     async def order_players(self, game_id):
         # Make sure player is in the game
-        if not self._verify_player_in_game(self.channel_name, game_id):
-            await self.send(json.dumps({'status':'fail', 'message':'Ordering can only be called by players in the game'}))
+        if not self._verify_player_in_game(channel=self.channel_name, game_id=game_id):
+            await self._send_fail_message('Ordering can only be called by players in the game')
             return
+        # Get current game
+        game = self.games[game_id]
         # Reset the ordering for every player
-        for player in self.games[game_id]['players']:
-            self.games[game_id]['players'][player]['position'] = -1
+        game.reset_ordering()
         # Update Game State
-        self._set_game_busy(game_id, 0) # busy up game ordering
+        game.set_ordering_busy()
         # Update the game status to be in standby mode
         await self.channel_layer.group_send(
             game_id,
@@ -244,82 +287,137 @@ class GameConsumer(AsyncWebsocketConsumer):
         return
 
     # Each client is going to call this to be counted in the order
-    async def count_me(self, game_id):
+    async def count_me(self, game_id:str):
+        # Make sure game is legit
+        if not self.games.__contains__(game_id):
+            await self._send_fail_message('That game ID is not an active game')
         # Make sure player is in game before being counted
         if not self._verify_player_in_game(self.channel_name, game_id):
             await self._send_fail_message('Must be in game to participate in count')
             return
+        # Get current game
+        game = self.games[game_id]
         # Make sure ordering is active
-        if not self._game_is_busy(game_id, 0):
+        if not game.ordering:
             await self._send_fail_message('Ordering is not currently active')
             return
-        position = self.count[game_id]
-        self.count[game_id] += 1
-        self.games[game_id]['players'][self.channel_name]['position'] = position
-        # Announce position of recent player to that player
-        await self.send(json.dumps({'status':'ok','body':{'position':position}}))
-        # If this si the last player, spit out the order to everyone
-        if position+1 == len(self.games[game_id]['players'].keys()):
-            order = sorted(self.games[game_id]['players'].keys(), key=lambda x: self.games[game_id]['players'][x]['position'])
-            name_order = [self.players[x]['name'] for x in order]
-            # Also update the current round players (put them in order)
-            for player in order:
-                self.games[game_id]['round']['players'][player] = 0
-                self.games[game_id]['round']['player_order'].append(player)
+        ordering_completed = game.set_player_position(self.channel_name)
+        if DEBUG:
+            await self.send(json.dumps(game.get_player_info(self.channel_name)))
+        if ordering_completed:
+            game.order_players()
+            game.set_ordering_free()
             await self.channel_layer.group_send(
                 game_id,
                 {
                     'type':'announce_order',
                     'game_id':game_id,
-                    'order':name_order
                 }
             )
-            # Free up game space
-            self._set_game_active(game_id, 0)
         return
 
+        # Make sure ordering is active
+        # if not self._game_is_busy(game_id, 0):
+            # await self._send_fail_message('Ordering is not currently active')
+            # return
+        # position = self.count[game_id]
+        # self.count[game_id] += 1
+        # self.games[game_id]['players'][self.channel_name]['position'] = position
+        # # Announce position of recent player to that player
+        # await self.send(json.dumps({'status':'ok','body':{'position':position}}))
+        # # If this is the last player, spit out the order to everyone
+        # if position+1 == len(self.games[game_id]['players'].keys()):
+            # order = sorted(self.games[game_id]['players'].keys(), key=lambda x: self.games[game_id]['players'][x]['position'])
+            # name_order = [self.players[x]['name'] for x in order]
+            # # Also update the current round players (put them in order)
+            # for player in order:
+                # self.games[game_id]['round']['players'][player] = 0
+                # self.games[game_id]['round']['player_order'].append(player)
+            # await self.channel_layer.group_send(
+                # game_id,
+                # {
+                    # 'type':'announce_order',
+                    # 'game_id':game_id,
+                    # 'order':name_order
+                # }
+            # )
+            # # Free up game space
+            # self._set_game_active(game_id, 0)
+        # return
+
     # ACCEPT EACH VOTE
-    async def count_vote(self, game_id, vote):
+    async def count_bool_vote(self, game_id:str, vote:bool):
+        # Make sure game exists
+        if not self._game_exists(game_id):
+            await self._send_fail_message('The game ID you provided does not exist')
+            return
         # Make sure player is voting in a game they're in
         if not self._verify_player_in_game(self.channel_name, game_id):
             await self._send_fail_message('Must be in the game to vote')
             return
+        # Make sure vote is a boolean
+        if not (type(vote) == bool):
+            await self._send_fail_message('Vote must be a boolean value')
+            return
+        # Get current game
+        game = self.games[game_id]
         # Make sure voting is active by checking the status
-        if not self.games[game_id]['status'][1]:
+        if not game.voting:
             await self._send_fail_message('No current voting process')
             return
+        # Add vote to game
+        try:
+            game.cast_bool_vote(channel=self.channel_name, vote=vote)
+        except ValueError as e:
+            await self._send_fail_message(e)
+            return
+        except TypeError as e:
+            await self._send_fail_message(e)
+            return
+        # Check if that vote brought about a verdict
+        if game.verdict_ready():
+            # If there is a verdict, spit it out to the other players
+            await self.channel_layer.group_send(
+                game_id,
+                {
+                    'type':'announce_vote_result',
+                    'game_id':game_id,
+                    'vote':game.get_verdict(), # Use this result to do whatever else in the future
+                }
+            )
+
         # Add vote to list // check if vote brings about a verdict
-        self.votes[game_id].append(int(vote))
-        await self.send(json.dumps({'votes':f'{self.votes[game_id]}'}))
-        for i in range(2):
-            if len([x for x in self.votes[game_id] if int(x)==i])>=math.ceil(len(self.games[game_id]['players'])/2):
-                await self.channel_layer.group_send(
-                    game_id,
-                    {
-                        'type':'announce_vote_result',
-                        'game_id':game_id,
-                        'vote': i,
-                    }
-                )
+        # self.votes[game_id].append(int(vote))
+        # await self.send(json.dumps({'votes':f'{self.votes[game_id]}'}))
+        # for i in range(2):
+            # if len([x for x in self.votes[game_id] if int(x)==i])>=math.ceil(len(self.games[game_id]['players'])/2):
+                # await self.channel_layer.group_send(
+                    # game_id,
+                    # {
+                        # 'type':'announce_vote_result',
+                        # 'game_id':game_id,
+                        # 'vote': i,
+                    # }
+                # )
 
     ### BETTING ###
     ## Play a check or a fold
-    async def play(self, game_id:str, play:str):
-        betting_round, _, _, max_bet, _, current_player, players, player_order = self.get_round_info(game_id)
-        if max_bet!=0 and play=='check':
-            await self._send_fail_message('Cannot check if bet is not 0')
-            return
-        # Make sure betting player is who is supposed to play
-        if self.channel_name != player_order[current_player]:
-            await self._send_fail_message('It is not your turn to play')
-            return
-        # Handle fold
-        if play=='fold':
-            self.games[game_id]['round']['players'].__delitem__(self.channel_name)
-            pass
-        # Handle check
-        if play=='check':
-            self.advance_bet()
+    # async def play(self, game_id:str, play:str):
+        # betting_round, _, _, max_bet, _, current_player, players, player_order = self.get_round_info(game_id)
+        # if max_bet!=0 and play=='check':
+            # await self._send_fail_message('Cannot check if bet is not 0')
+            # return
+        # # Make sure betting player is who is supposed to play
+        # if self.channel_name != player_order[current_player]:
+            # await self._send_fail_message('It is not your turn to play')
+            # return
+        # # Handle fold
+        # if play=='fold':
+            # self.games[game_id]['round']['players'].__delitem__(self.channel_name)
+            # pass
+        # # Handle check
+        # if play=='check':
+            # self.advance_bet()
 
     ## Play a bet
     async def play_bet(self, game_id:str, amount:int):
@@ -411,37 +509,52 @@ class GameConsumer(AsyncWebsocketConsumer):
     ''' ANNOUNCEMENTS '''
     # Announces to all the clients that we are starting the ordering process
     async def announce_ordering_start(self, event):
-        await self.send(json.dumps({'status':'ok','body':{'message':'Starting ordering process'}}))
+        await self.send(json.dumps({'status':'action','action':'ORDER'}))
     
     ## ANNOUNCE FINAL ORDER
     async def announce_order(self, event):
-        if not self._has_params(event, ['game_id', 'order']):
+        if not self._has_params(event, ['game_id']):
             await self._send_fail_message('Need game ID to get order')
         game_id = event['game_id']
-        order = event['order']
+        game = self.games[game_id]
+        # game.order_players()
+        await self.send(json.dumps({'status':'update','update':game.get_ordered_players}))
+        # game.set_ordering_free()
+        return
+
+        # order = event['order']
         # order = sorted(self.games[game_id]['players'].keys(), key=lambda x: self.games[game_id]['players'][x]['position'])
         # order = [self.players[x]['name'] for x in order]
-        await self.send(json.dumps({'status':'ok','body':{'order':order}}))
+        # await self.send(json.dumps({'status':'ok','body':{'order':order}}))
         self._set_game_active(game_id, 0) # Free up game ordering
         return
 
     ## ANNOUNCE START OF VOTING PROCESS
     async def announce_voting_start(self, event):
-        self._set_game_busy(event['game_id'], 1) # Busy up game voting
-        self.votes[event['game_id']] = list()
-        await self.send(json.dumps({'status':'action','body':{'action':'VOTE','voting_param':event['voting_param']}}))
+        # self._set_game_busy(event['game_id'], 1) # Busy up game voting
+        # self.votes[event['game_id']] = list()
+        game_id = event['game_id']
+        game = self.games[game_id]
+        game.set_voting_busy() # set game state
+        game.reset_voting() # Reset voting game state
+        # Announce voting param
+        agenda = event['voting_param']
+        await self.send(json.dumps({'status':'action','action':'VOTE','agenda':agenda}))
 
+    # This function gets the vote winner and announces it // resets game voting
     async def announce_vote_result(self, event):
-        await self.send(json.dumps({'status':'ok','body':{'winner':event['vote']}}))
-        self._set_game_active(event['game_id'], 1) # Turn off voting busy for the game
+        await self.send(json.dumps({'status':'result','result':event['vote']}))
+        # self._set_game_active(event['game_id'], 1) # Turn off voting busy for the game
+        game_id = event['game_id']
+        game = self.games[game_id]
+        game.reset_voting()
+        game.set_voting_free()
 
     ''' USEFUL FUNCTIONS '''
-    def _verify_player_in_game(self, player_id, game_id):
-        if self.players[player_id]['games'] == []:
-            return False
-        if game_id not in self.players[player_id]['games']:
-            return False
-        return True
+    def _verify_player_in_game(self, channel:str, game_id:str):
+        if self.games[game_id].player_is_in_game(channel):
+            return True
+        return False
 
     def _has_params(self, data:dict, params:List) -> bool:
         for p in params:
@@ -456,13 +569,15 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     # @param index // 0=ordering, 1=voting
 
-    def _set_game_busy(self, game_id:str, index:int):
-        self.games[game_id]['status'][index] = 0
+    # def _set_game_busy(self, game_id:str, index:int):
+        # self.games[game_id]['status'][index] = 0
 
-    def _set_game_active(self, game_id:str, index:int):
-        self.games[game_id]['status'][index] = 1
+    # def _set_game_active(self, game_id:str, index:int):
+        # self.games[game_id]['status'][index] = 1
 
     # Returns whether the game is budy
-    def _game_is_busy(self, game_id:str, index:int) -> bool:
-        return not bool(self.games[game_id]['status'][index])
+    # def _game_is_busy(self, game_id:str) -> bool:
+        # game = self.games[game_id]
 
+    def _game_exists(self, game_id:str) -> bool:
+        return self.games.__contains__(game_id)

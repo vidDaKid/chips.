@@ -1,64 +1,22 @@
 '''
 Holds state for each game and allows for abstracted actions
 '''
-from bet_api.g_round import Round
+# from bet_api.g_round import Round
+from bet_api.player import Player
+from bet_api.table import Table
 from typing import Optional, List
 import json, math
 
-class Player:
-    def __init__(self, channel:str, name:str=None, c_count:Optional[int]=None):
-        # @var channel // self.channel_name in django channels
-        self.channel = channel
-        # @var position // seat position at table
-        self.position:int = -1
-        # @var c_count // chip count (total chips)
-        self.c_count:int = c_count or 0
-        # @var name // player nickname
-        self.name:str = name or 'Player ' + str(self.position)
-
-        # ROUND STATE
-        ## @var curr_bet // the current bet for the betting round
-        self.curr_bet:int = 0
-        ## @var all_in // whether or not the player is all in
-        self.all_in:bool = False
-        ## @var folded // whether or not player has folded
-        self.folded:bool = False
-        ## @var voted // keeps track of if the player has voted
-
-    def reset_round(self) -> None:
-        self.curr_bet = 0
-        self.all_in, self.folded = False, False
-
-    def change_name(self, new_name:str) -> str:
-        if type(new_name)!=str:
-            raise TypeError('Name must be a string')
-        self.name = new_name
-        return new_name
-
-    def add_bet(self, bet_size:int) -> None:
-        if self.c_count > bet_size:
-            raise ValueError('Bet size larger than number of available chips')
-        self.curr_bet += bet_size
-        self.c_count -= bet_size
-
-    def go_all_in(self) -> None:
-        self.current_bet += self.c_count
-        self.c_count = 0
-        self.all_in = True
-
-    def fold(self) -> None:
-        self.folded = True
-
-
 class Game:
     def __init__(self):
-        self.players:List[Player] = list()
-
         # @var settings // game settings
         self.settings = self.default_settings()
 
         # @var round // round state for current roudn
-        self.round = Round()
+        # self.round = Round()
+
+        # @var table // stores table info 
+        self.table = Table()
 
         # @var ordering // whether or not the game is currently ordering
         self.ordering = False
@@ -72,68 +30,96 @@ class Game:
 
     # BET FUNCTIONS
     def place_bet(self, channel:str, bet_size:int) -> None:
-        if bet_size == (cc := self.players[channel].c_count):
-            self.round.place_all_in_bet(self.get_player(channel), bet_size)
-        elif bet_size > cc:
-            raise ValueError('The bet size is larger than the amount of chips you have')
-        else:
-            self.round.place_bet(self.get_player(channel), bet_size)
+        self.table.place_bet(channel, bet_size)
+
+        return self.table.pots
+        # if bet_size == (cc := self.players[channel].c_count):
+            # self.round.place_all_in_bet(self.get_player(channel), bet_size)
+        # elif bet_size > cc:
+            # raise ValueError('The bet size is larger than the amount of chips you have')
+        # else:
+            # self.round.place_bet(self.get_player(channel), bet_size)
+        # # Then check if the iteration has finished
+        # if self.round.check_if_iteration_finished():
+            # nxt_player = self.get_player_by_position(self.round.real_last_raise) # The 1st player in new iter
+            # for i in range(len(self.total_players)):
+                # if not nxt_player.all_in:
+                    # break
+                # # if so, check if there needs to be another go around
+                # new_pos = self.round.get_next_player(nxt_player.position)
+                # nxt_player = self.get_player_by_position(new_pos)
+            # else:
+                # # if everyone is all in, we can just jump to deciding a winner
+                # ''' DECIDE WINNER '''
+                # pass
+        # else:
+            # # Otherwise just go to the next betting round
+            # # self.round.
+            # pass
+
 
     def fold(self, channel:str) -> None:
-        self.round.fold(self.get_player(channel))
+        self.table.fold(channel)
+        # self.round.fold(self.get_player(channel))
 
     # PLAYER FUNCTIONS
     def order_players(self) -> None:
-        self.players.sort(key=lambda x: x.position)
+        # self.players.sort(key=lambda x: x.position)
+        self.table.order_players()
 
     def add_player(self, channel:str, name:str, c_count:Optional[int]=None):
         if not c_count:
             c_count = self.settings.get('default_count')
-        new_player = Player(channel, name=name, c_count=c_count)
+        self.table.add_player(channel,name,c_count)
+        # new_player = Player(channel, name=name, c_count=c_count)
         # The new position will be 1 more than the position of the last player
-        new_position = self.get_ordered_players
-        new_position = len(new_position)
-        new_player.position = new_position # Update player position
-        self.players.append(new_player)
+        # new_position = len(self.players)
+        # new_player.position = new_position # Update player position
+        # self.players.append(new_player)
+        # self.round.total_players += 1 # Add 1 to the player count
 
     # Get player by *channel*
-    def get_player(self, channel:str) -> Player:
-        for player in self.players:
-            if player.channel == channel:
-                return player
-        raise ValidationError('That player is not in this game')
+    # def get_player(self, channel:str) -> Player:
+        # for player in self.players:
+            # if player.channel == channel:
+                # return player
+        # raise ValidationError('That player is not in this game')
+
+    # def get_player_by_position(self, positon:int) -> Player:
+        # return self.get_ordered_players[position]
 
     def get_player_info(self, channel:str) -> dict[str and int]:
+        player = self.table._get_player_by_channel(channel)
+        return player
         # This will raise an error if there's no player
-        player = self.get_player(channel)
-        output = {'status':'ok', 'body':{'Name':player.name,'Chip Count':player.c_count,'Position':player.position}}
-        return output
+        # player = self.get_player(channel)
+        # output = {'status':'ok', 'body':{'Name':player.name,'Chip Count':player.c_count,'Position':player.position}}
+        # return output
 
     def player_is_in_game(self, channel:str) -> bool:
-        for player in self.players:
-            if player.channel == channel:
-                return True
-        return False
+        return self.table.player_is_in_game(channel)
+        # for player in self.players:
+            # if player.channel == channel:
+                # return True
+        # return False
 
     def name_is_available(self, name:str) -> bool:
-        for player in self.players:
-            if player.name == name:
-                return False
-        return True
+        return self.table.name_is_available(name)
+        # for player in self.players:
+            # if player.name == name:
+                # return False
+        # return True
 
     # Sets players position as current count && increments count (for serverside ordering)
         # return value says whether or not ordering is complete
     def set_player_position(self, channel:str) -> bool:
-        player = self.get_player(channel)
-        player.position = self.count
         self.count += 1
-        if self.count == len(self.players):
-            return True
-        return False
+        return self.table.set_player_position(channel, self.count)
+        # player = self.get_player(channel)
+        # player.position = self.count
 
-    @property
     def get_ordered_players(self) -> List[str]:
-        return [x.name for x in sorted(self.players, key=lambda x: x.position)]
+        return [x.name for x in sorted(self.table.players, key=lambda x: x.position)]
 
     # SETTINGS FUNCTIONS
     def default_settings(self) -> dict[str]:
@@ -148,17 +134,23 @@ class Game:
         # Do some checking / error handling here at some point
         self.settings = new_settings
 
-    # GAME FUNCTIONS
+    # SETUP FUNCTIONS
     def set_ordering_busy(self) -> None:
         self.ordering = True
 
     def set_ordering_free(self) -> None:
         self.ordering = False
 
+    def ordering_is_finished(self) -> bool:
+        if self.count == len(self.table.players):
+            return True
+        return False
+
     def reset_ordering(self) -> None:
-        for player in self.players:
-            player.position = -1
-        self.count = 0
+        self.table.reset_ordering()
+        # for player in self.players:
+            # player.position = -1
+        # self.count = 0
 
     def set_voting_busy(self) -> None:
         self.voting = True
@@ -167,18 +159,19 @@ class Game:
         self.voting = False
 
     def cast_bool_vote(self, channel:str, vote:bool) -> None:
-        player = self.get_player(channel)
-        if vote is not (True or False):
-            raise TypeError('Vote must be a boolean value: True or False')
-        if player.voted:
-            raise ValueError('Each player can only vote once')
-        self.vote_count[vote] += 1
-        player.voted = True
+        self.table.cast_bool_vote(channel, vote)
+        # player = self.get_player(channel)
+        # if vote is not (True or False):
+            # raise TypeError('Vote must be a boolean value: True or False')
+        # if player.voted:
+            # raise ValueError('Each player can only vote once')
+        # player.voted = True
+        self.vote_count[vote] += 1 # KEEP THIS
 
     # True means that the result is ready, NOT that the result is true
     def verdict_ready(self) -> bool:
         for boolean,num_votes in self.vote_count.items():
-            if num_votes >= math.ceil(len(self.players)/2):
+            if num_votes >= math.ceil(len(self.table.players)/2):
                 return True
         return False
 
@@ -190,8 +183,9 @@ class Game:
                 return boolean
 
     def reset_voting(self) -> None:
-        for player in self.players:
-            player.voted = False
+        self.table.reset_voting()
+        # for player in self.players:
+            # player.voted = False
         self.vote_count = {True:0,False:0}
 
     # BUILT IN

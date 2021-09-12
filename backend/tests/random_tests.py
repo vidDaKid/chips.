@@ -27,12 +27,28 @@ def make_action(typ,*args,**kwargs) -> 'json(dict)':
 def test_create(ws=None):
     if not ws:
         ws = WebSocket()
+        # try:
         ws.connect(LINK)
+        # except Exception as e:
+            # print('[FAILED TO CONNECT TO LINK]')
+            # print(e)
+            # return
         # ws.recv()
+    # try:
     ws.send(make_action('CREATE'))
+    # except Exception as e:
+        # print('[FAILED TO SEND ACTION TO TCP SERVER]')
+        # print(e)
+        # return
+    # try:
     game = ws.recv()
-    print('='*8, 'CREATED GAME', '='*8)
-    print(game)
+    # except Exception as e:
+        # print('[FAILED TO CONNECT TO GAME]')
+        # print(e)
+        # return
+    if game:
+        print('='*8, 'CREATED GAME', '='*8)
+        print(game)
     # return game['game_id']
     return ws
 
@@ -45,8 +61,12 @@ def test_join(game_id:str, name:str='vee', ws=None):
     print(info)
     return ws
 
-def test_order(ws:'WebSocket', game_id:str):
+def start_order(ws:'WebSocket', game_id:str):
     ws.send(make_action('ORDER', game_id=game_id))
+    return ws
+
+def count_me(ws:'WebSocket', game_id:str):
+    ws.send(make_action('COUNT', game_id=game_id))
     return ws
 
 def start_vote(ws:'WebSocket', game_id:str, vote_param:str):
@@ -95,12 +115,12 @@ def cast_vote(ws:'WebSocket', game_id:str, vote:bool):
     # # count_me(ws, game_id)
     # return ws
 
-def order(ws, game_id):
-    ws.send(make_action('ORDER',game_id=game_id))
-    print(ws.recv())
-    return ws
+# def order(ws, game_id):
+    # ws.send(make_action('ORDER',game_id=game_id))
+    # print(ws.recv())
+    # return ws
 
-def count(ws, game_id:str):
-    ws.send(make_action('COUNT', game_id=game_id))
-    print(ws.recv())
-    return ws
+# def count(ws, game_id:str):
+    # ws.send(make_action('COUNT', game_id=game_id))
+    # print(ws.recv())
+    # return ws

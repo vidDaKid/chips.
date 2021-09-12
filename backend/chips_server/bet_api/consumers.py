@@ -46,7 +46,9 @@ class GameConsumer(AsyncWebsocketConsumer):
         # Find all the games the player was in and eliminate the player
         # await self._send_fail_message(self.channel_name)
 
-        game = self.player_games[self.channel_name]
+        game_id = self.player_games[self.channel_name]
+        game = self.games[game_id]
+        # Kick player out of game if they disconnect
             # do something w the game (like set them inactive) if u want
 
         # for game_id in p_games:
@@ -196,17 +198,24 @@ class GameConsumer(AsyncWebsocketConsumer):
                 await self._send_fail_message('Bet must include a bet size')
                 return
             try:
-                game.place_bet(channel=self.channel_name, bet_size=bet_size)
+                new_pot = game.place_bet(channel=self.channel_name, bet_size=bet_size)
             except ValueError as e:
                 await self._send_fail_message(e)
                 return
             else:
+                # await self.channel_layer.group_send(
+                    # game_id,
+                    # {
+                        # 'type':'announce_bet',
+                        # 'game_id':game_id,
+                        # 'bet_size':bet_size,
+                    # }
+                # )
                 await self.channel_layer.group_send(
                     game_id,
                     {
-                        'type':'announce_bet',
-                        'game_id':game_id,
-                        'bet_size':bet_size,
+                        'type':'announce_pot',
+                        'pot':new_pot,
                     }
                 )
         elif play == 'fold':
@@ -271,6 +280,9 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self._send_fail_message('The name you chose is taken')
             return
 
+        # Add game to player state
+        self.player_games[self.channel_name] = game_id
+
         # Add client to the channel
         await self.channel_layer.group_add(
             game_id,
@@ -288,21 +300,21 @@ class GameConsumer(AsyncWebsocketConsumer):
         # Get player info
         if DEBUG:
             info = game.get_player_info(self.channel_name)
-            await self.send(json.dumps(info))
+            await self.send(str(info))
         return
 
     # SEND CURRENT GAME STATE
-    async def game_status(self, game_id):
-        # Make sure person asking is in the game
-        if self.channel_name not in self.games[game_id]['players']:
-            await self.send(json.dumps({'status':'fail', 'message':'Can only get info on a game that you are in'}))
-            return
-        # Get and return all the information about the game
-        ## Convert channel names to nicknames to keep private info private
-        new_players = {self.players[x]['name']:y for x,y in self.games[game_id]['players'].items()}
-        updated_game = dict(self.games[game_id])
-        updated_game['players'] = new_players
-        await self.send(json.dumps({'status':'ok','body':updated_game}))
+    # async def game_status(self, game_id):
+        # # Make sure person asking is in the game
+        # if self.channel_name not in self.games[game_id]['players']:
+            # await self.send(json.dumps({'status':'fail', 'message':'Can only get info on a game that you are in'}))
+            # return
+        # # Get and return all the information about the game
+        # ## Convert channel names to nicknames to keep private info private
+        # new_players = {self.players[x]['name']:y for x,y in self.games[game_id]['players'].items()}
+        # updated_game = dict(self.games[game_id])
+        # updated_game['players'] = new_players
+        # await self.send(json.dumps({'status':'ok','body':updated_game}))
 
     # Resets the ordering and gets ready for everyone to call 'count_me'
     async def order_players(self, game_id):
@@ -340,9 +352,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         if not game.ordering:
             await self._send_fail_message('Ordering is not currently active')
             return
-        ordering_completed = game.set_player_position(self.channel_name)
+        game.set_player_position(self.channel_name)
+        ordering_completed = game.ordering_is_finished()
         if DEBUG:
-            await self.send(json.dumps(game.get_player_info(self.channel_name)))
+            await self.send(str(game.get_player_info(self.channel_name)))
         if ordering_completed:
             game.order_players()
             game.set_ordering_free()
@@ -557,7 +570,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         game_id = event['game_id']
         game = self.games[game_id]
         # game.order_players()
-        await self.send(json.dumps({'status':'update','update':game.get_ordered_players}))
+        await self.send(json.dumps({'status':'update','update':game.get_ordered_players()}))
         # game.set_ordering_free()
         return
 
@@ -593,6 +606,8 @@ class GameConsumer(AsyncWebsocketConsumer):
     async def announce_bet(self, event):
         game_id, bet_size = event['game_id'], event['bet_size']
 
+    async def announce_pot(self, pot):
+        await self.send(pot)
 
     ''' USEFUL FUNCTIONS '''
     def _verify_player_in_game(self, channel:str, game_id:str):

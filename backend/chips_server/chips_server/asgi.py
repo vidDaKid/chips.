@@ -11,6 +11,7 @@ import os
 
 from channels.auth import AuthMiddlewareStack
 from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.security.websocket import OriginValidator, AllowedHostsOriginValidator
 from django.core.asgi import get_asgi_application
 from django.conf.urls import url
 
@@ -20,10 +21,13 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'chips_server.settings')
 
 application = ProtocolTypeRouter({
     'http': get_asgi_application(),
-    'websocket': AuthMiddlewareStack(
-        URLRouter(
-            # Websocket url routes from each app
-            bet_api.routing.websocket_urlpatterns
-        )
-    ),
+    'websocket': AllowedHostsOriginValidator(
+        AuthMiddlewareStack(
+            URLRouter(
+                # Websocket url routes from each app
+                bet_api.routing.websocket_urlpatterns
+            )
+        ),
+    )
+        # ['http://localhost:3000/', ] # List of accepted user calls
 })

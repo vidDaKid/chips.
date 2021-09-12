@@ -37,8 +37,8 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.accept()
 
         # await self.send(self.channel_name)
-        if DEBUG:
-            print('CONNECTED to new socket client')
+        # if DEBUG:
+            # print('CONNECTED to new socket client')
 
         return
 
@@ -74,6 +74,17 @@ class GameConsumer(AsyncWebsocketConsumer):
         # except Exception as e:
             # await self.send('DATA NEEDS AN ACTION')
             # return
+
+        # Make sure its a dictionary
+        if type(action) is not dict:
+            await self._send_fail_message("Can't accept non json messages")
+            return
+
+        # Make sure the action has a type
+        if not action.__contains__('type'):
+            await self._send_fail_message('A message must have a type')
+            return
+
         
         # ACTION SPACE
         ## Create new game
@@ -256,10 +267,15 @@ class GameConsumer(AsyncWebsocketConsumer):
 
 
     # JOIN GAME
-    async def join_game(self, game_id:str, name:str):
+    async def join_game(self, name:str, game_id:str=''):
         # game_id = game_id or self.game_id
         # await self.send(self.game_id)
         # return
+
+        # Set game_id as the game_id in the link if theres no game_id
+        if game_id == '':
+            game_id = self.scope['url_path']['kwargs']['game_id']
+
         # Make sure game exists
         if not self.games.__contains__(game_id):
             await self._send_fail_message('The game ID you sent is not an active game')

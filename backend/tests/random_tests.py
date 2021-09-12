@@ -1,7 +1,8 @@
 from websocket import create_connection, WebSocketApp, WebSocket
 import asyncio, json
 
-LINK = "ws://localhost:8000/ws/game/"
+# LINK = "ws://localhost:8000/ws/game/"
+LINK = "ws://localhost:8001/ws/game/"
 GAME_ID = "SMH123"
 GAME_ENDPOINT = "ws/game/" + GAME_ID + "/"
 F_LINK = LINK + GAME_ENDPOINT

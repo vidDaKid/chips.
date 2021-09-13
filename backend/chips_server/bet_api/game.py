@@ -10,7 +10,7 @@ import json, math
 class Game:
     def __init__(self):
         # @var settings // game settings
-        self.settings = self.default_settings()
+        # self.settings = self.default_settings()
 
         # @var round // round state for current roudn
         # self.round = Round()
@@ -21,12 +21,12 @@ class Game:
         # @var ordering // whether or not the game is currently ordering
         self.ordering = False
         # @var count // keeps track of the current number for ordering
-        self.count:int = 0
+        # self.count:int = 0
 
         # @var voting // whether or not the game is currently voting
         self.voting = False
         # @var vote_count // storing votes from each player (anonymously)
-        self.vote_count = {True:0,False:0} # False=reject, True=accept
+        # self.vote_count = {True:0,False:0} # False=reject, True=accept
 
     # BET FUNCTIONS
     def place_bet(self, channel:str, bet_size:int) -> None:
@@ -67,9 +67,9 @@ class Game:
         # self.players.sort(key=lambda x: x.position)
         self.table.order_players()
 
-    def add_player(self, channel:str, name:str, c_count:Optional[int]=None):
-        if not c_count:
-            c_count = self.settings.get('default_count')
+    def add_player(self, channel:str, name:str='', c_count:Optional[int]=None):
+        # if not c_count:
+            # c_count = self.settings.get('default_count')
         self.table.add_player(channel,name,c_count)
         # new_player = Player(channel, name=name, c_count=c_count)
         # The new position will be 1 more than the position of the last player
@@ -112,27 +112,25 @@ class Game:
 
     # Sets players position as current count && increments count (for serverside ordering)
         # return value says whether or not ordering is complete
-    def set_player_position(self, channel:str) -> bool:
-        self.count += 1
-        return self.table.set_player_position(channel, self.count)
-        # player = self.get_player(channel)
-        # player.position = self.count
+    # def set_player_position(self, channel:str) -> bool:
+        # self.count += 1
+        # return self.table.set_player_position(channel, self.count)
 
     def get_ordered_players(self) -> List[str]:
         return [x.name for x in sorted(self.table.players, key=lambda x: x.position)]
 
     # SETTINGS FUNCTIONS
-    def default_settings(self) -> dict[str]:
-        settings = {
-            'default_count': 200,
-            'big_blind': 4,
-            # Add in any advance settings that you want later
-        }
-        return settings
-
-    def update_settings(self, new_settings:dict[str and int]):
-        # Do some checking / error handling here at some point
-        self.settings = new_settings
+    # def default_settings(self) -> dict[str]:
+        # settings = {
+            # 'default_count': 200,
+            # 'big_blind': 4,
+            # # Add in any advance settings that you want later
+        # }
+        # return settings
+# 
+    # def update_settings(self, new_settings:dict[str and int]):
+        # # Do some checking / error handling here at some point
+        # self.settings = new_settings
 
     # SETUP FUNCTIONS
     def set_ordering_busy(self) -> None:
@@ -141,13 +139,13 @@ class Game:
     def set_ordering_free(self) -> None:
         self.ordering = False
 
-    def ordering_is_finished(self) -> bool:
-        if self.count == len(self.table.players):
-            return True
-        return False
+    # def ordering_is_finished(self) -> bool:
+        # if self.count == len(self.table.players):
+            # return True
+        # return False
 
-    def reset_ordering(self) -> None:
-        self.table.reset_ordering()
+    # def reset_ordering(self) -> None:
+        # self.table.reset_ordering()
         # for player in self.players:
             # player.position = -1
         # self.count = 0
@@ -166,29 +164,29 @@ class Game:
         # if player.voted:
             # raise ValueError('Each player can only vote once')
         # player.voted = True
-        self.vote_count[vote] += 1 # KEEP THIS
+        # self.vote_count[vote] += 1 # KEEP THIS
 
     # True means that the result is ready, NOT that the result is true
-    def verdict_ready(self) -> bool:
-        for boolean,num_votes in self.vote_count.items():
-            if num_votes >= math.ceil(len(self.table.players)/2):
-                return True
-        return False
+    # def verdict_ready(self) -> bool:
+        # for boolean,num_votes in self.vote_count.items():
+            # if num_votes >= math.ceil(len(self.table.players)/2):
+                # return True
+        # return False
 
-    def get_verdict(self) -> bool:
-        if not self.verdict_ready():
-            raise ValidationError('Voting result is not yet ready')
-        for boolean, num_votes in self.vote_count.items():
-            if num_votes >= math.ceil(len(self.players)/2):
-                return boolean
+    # def get_verdict(self) -> bool:
+        # if not self.verdict_ready():
+            # raise ValidationError('Voting result is not yet ready')
+        # for boolean, num_votes in self.vote_count.items():
+            # if num_votes >= math.ceil(len(self.players)/2):
+                # return boolean
 
-    def reset_voting(self) -> None:
-        self.table.reset_voting()
-        # for player in self.players:
-            # player.voted = False
-        self.vote_count = {True:0,False:0}
+    # def reset_voting(self) -> None:
+        # self.table.reset_voting()
+        # # for player in self.players:
+            # # player.voted = False
+        # self.vote_count = {True:0,False:0}
 
     # BUILT IN
     ## represents game as a json string
-    # def __repr__(self) -> str:
-        # players = self.get_ordered_players
+    def __repr__(self) -> str:
+        return repr(self.table)

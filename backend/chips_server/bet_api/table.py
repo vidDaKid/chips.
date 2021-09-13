@@ -154,6 +154,10 @@ class Table:
                 return player
         raise KeyError('The player you are looking for is not at this table')
 
+    @property
+    def total_players(self) -> int:
+        return len(self.players)
+
     # BUILT IN FUNCTIONS
     def __repr__(self) -> str:
         output = str('='*8 + 'TABLE' + '='*8)

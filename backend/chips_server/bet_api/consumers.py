@@ -14,16 +14,24 @@ class GameConsumer(AsyncWebsocketConsumer):
     games = defaultdict(Game)
     game_id = ''
 
+    # Connect to websocket and join the game from your link
     async def connect(self):
         # Get the game id from the link
-        self.game_id = self.scope['url_route']['kwargs']['game_id']
+        try:
+            self.game_id = self.scope['url_route']['kwargs']['game_id']
+        except KeyError:
+            await self.close()
+            return
+
         # Get the game
         game = self.games[self.game_id]
+        # If the game is empty, restart it (could also do this in disconnect... or just delete it)
+        if game.table.total_players == 0:
+            self.games[self.game_id] = Game()
+            game = self.games[self.game_id]
 
-        # If the player wasn't already in the game,
-        if not game.table.player_is_in_game(self.channel_name):
-            game.add_player(self.channel_name)
-
+        # Add player to game
+        game.table.add_player(channel=self.channel_name)
         # Add player to channel layer
         await self.channel_layer.group_add(self.game_id, self.channel_name)
 
@@ -33,7 +41,9 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         # Remove player from the game
-        self.games[self.game_id].table.remove_player(self.channel_name)
+        game = self.games[self.game_id]
+        if game.table.player_is_in_game(self.channel_name):
+            game.table.remove_player(self.channel_name)
         return
 
     # Receive action from client and send it to the game
@@ -41,17 +51,9 @@ class GameConsumer(AsyncWebsocketConsumer):
         # Try to parse the received data // if its not json spit out the error
         try:
             action = json.loads(text_data)
-        except Exception as e:
+        except json.JSONDecodeError:
             await self._send_fail_message("Can't accept non json messages")
             return
-        # User is the channel_name for now (change to self.user soon probably)
-        user = self.channel_name
-        # Get the action from the message // Spit out error otherwise
-        # try:
-            # action = text_data['action']
-        # except Exception as e:
-            # await self.send('DATA NEEDS AN ACTION')
-            # return
 
         # Make sure its a dictionary
         if type(action) is not dict:

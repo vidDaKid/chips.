@@ -40,12 +40,16 @@ class Player:
 
 # BET FUNCTIONS
     def add_bet(self, bet_size:int) -> None:
-        self.curr_bet += bet_size
-        # self.curr_rnd_bet += bet_size
-        self.c_count -= bet_size
+        # Make sure bet is valid
+        if not self.bet_is_valid(bet_size):
+            raise ValueError('Bet size is greater than amount of chips remaining')
         ## check if the bet is all in, if so set player.all_in to True
         if self.bet_is_all_in(bet_size):
             self.all_in = True
+        # Add the bet_size to the state
+        self.curr_bet += bet_size
+        # self.curr_rnd_bet += bet_size
+        self.c_count -= bet_size
 
     # def go_all_in(self) -> None:
         # self.curr_bet += self.c_count

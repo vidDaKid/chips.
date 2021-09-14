@@ -23,6 +23,9 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
 
+        # TEMP: print out request headers
+        print(self.scope['headers'])
+
         # Get the game
         game = self.games[self.game_id]
         # If the game is empty, restart it (could also do this in disconnect... or just delete it)

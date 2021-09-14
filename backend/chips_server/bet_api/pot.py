@@ -5,13 +5,13 @@ from collections import defaultdict
 from bet_api.bet import Bet
 
 class Pot:
-    def __init__(self, value:int=0):
+    def __init__(self, value:int=0, max_bet:int=float('inf')):
         # @var val // value of the current pot
         self.val:int = value
 
         # @var max_bet // max bet for this pot (if someone goes all in, this becomes that amount)
             # In the case that a second person goes all in for lower, the max bet is dropped and the difference is turned into a new pot
-        self.max_bet:int = float('inf')
+        self.max_bet:int = max_bet
 
         # @var bets // how much each player has bet to the pot
         self.bets = defaultdict(int) # { Player : bet_size }
@@ -26,10 +26,10 @@ class Pot:
         self.bets[bet.player] += bet.bet_size
         return self
 
-    def bet_size_allowed(self, player:'Player'):
-        if self.max == float('inf'):
-            return float('inf')
-        return self.max - self.bets[player]
+    # def bet_size_allowed(self, player:'Player'):
+        # if self.max == float('inf'):
+            # return float('inf')
+        # return self.max - self.bets[player]
 
     @classmethod
     def new_pot_from_bet(cls, bet:Bet) -> 'Pot':
@@ -78,10 +78,11 @@ class Pots:
     
     # MAIN FUNCTIONS
     ## Adds bets for all in players
-    def add_all_in(self, amount:int) -> 'Pots':
-        self._add_safe(amount, True)
-        return self
+    # def add_all_in(self, amount:int) -> 'Pots':
+        # self._add_safe(amount, True)
+        # return self
 
+    # Resets at the beginning of each new round
     def reset(self) -> 'Pots':
         self.pots = [Pot()]
         return self
@@ -91,16 +92,17 @@ class Pots:
         for pot in self.pots:
             if pot.max_bet != float('inf'):
                 pot.max_bet = 0
+                # pot.
 
     # HELPER FUNCTIONS
-    def _add_safe(self, bet:Bet, all_in:bool) -> None:
+    def _add_safe(self, bet:Bet) -> None:
         if not isinstance(bet, Bet):
             raise TypeError('Pots can only be added to a`Bet` object')
         for pot in self.pots:
             # If the bet is smaller than the max, just add the bet and move on
             if pot.max_bet >= bet.bet_size:
                 # empty the bet into the pot n move on if not all in
-                if not all_in:
+                if not bet.all_in:
                     pot += bet
                     bet.bet_size = 0
                     break
@@ -121,7 +123,7 @@ class Pots:
             # Only time this would happen is if u r the first to bet more than the current all_in
         else:
             # If not all in, just make a new pot with the bet amount
-            if not all_in:
+            if not bet.all_in:
                 self.pots.append(Pot.new_pot_from_bet(bet))
                 bet.bet_amount = 0
             # otherwsie, make a new pot & add an all in bet

@@ -11,6 +11,9 @@ class Table:
     def __init__(self):
         # @var players // all the players in the game -- sorted
         self.players:List[Player] = list()
+        # @var queue // all the non folded players in the current iteration
+        self.queue:List[Player] = list()
+
         # @var pot // Holds all the pot state
         self.pot = Pots()
 
@@ -38,22 +41,68 @@ class Table:
     # BET FUNCTIONS
     def place_bet(self, channel:str, bet_size:int) -> None:
         player = self._get_player_by_channel(channel)
+        # Make sure player is up to vote
+        ''' SELF.CURRENT PLAYER == PLAYER '''
         # Make sure the bet is legit
         valid, err_msg = player.bet_is_valid(bet_size)
         if not valid:
             raise ValueError(err_msg)
-        # Then add the bet to the player obj
-        player.add_bet(bet_size)
 
         # Create a new bet to add to the pot
         bet = Bet(bet_size=bet_size, player=player)
         ## Then add the bet to the pot
         self.pots += bet
 
+        # Then add the bet to the player obj
+        player.add_bet(bet_size)
+
+    def play_blinds(self) -> None:
+        # Get the blinds
+        player_sb = self.players[self.st_player+1]
+        player_bb = self.players[self.st_player+2]
+        # Get blinds
+        big_blind = self.settings['big_blind']
+        small_blind = round(big_blind/2)
+        # Add small_blind bet
+        sb_bet_size = max(small_blind, player_sb.c_count)
+        # if sb_bet_size == player_sb.c_count:
+            # self.
+
 
     def fold(self, channel:str) -> None:
         player = self._get_player_by_channel(channel)
         player.fold()
+
+    def start_round(self) -> None:
+        # We want to create a queue of everyone playing in this iteration
+        # Since the st_player is dealer, we need the player 3 after in order to start after BB
+        player_after_bb:int = self._get_future_player(self.st_player, 3)
+        # we want a list of players starting w him & ending w person before him to iterate thru
+        temp_players = self.players[players_after_bb:] + self.players[:player_after_bb]
+        # Turn this into an iterable to save memory and more importantly iterate thru it easier
+        self.queue = iter(temp_players)
+    
+        # Get the game ready for the round
+        ## Reset the pot
+        self.pot.reset()
+        ## add bets to the blinds
+
+
+
+
+        # Create a temporary list of all the players starting from 3 after the starting player (so the person after the big blind)
+        temp_players =  self.players[self.st_player+3:] + self.players[:self.st_player+3] 
+        # Create a queue of the non folded players for this iteration
+        # This way we can iterate through it as we need the current player
+        self.queue = iter([x for x in temp_players if not x.folded])
+        # Reset the pot for the round
+        self.pot.reset()
+
+    def start_betting_round(self) -> None:
+        # Same as start_round
+        self.queue = iter([x for x in self.players[self.st_player+1:] + self.players[:self.st_player+1] if not x.folded])
+        # Make sure old side pots are deactivated for new round
+        self.pot.next_bet_round()
 
 
     # PLAYER FUNCTIONS
@@ -137,15 +186,15 @@ class Table:
 
 
     # HELPER FUNCTIONS
-    def _get_next_player(self, curr_player:Player) -> Player:
-        if curr_player.position + 1 == len(self.players):
-            return self.players[0]
-        else:
-            return self.players[curr_player.position+1]
+    ## Get the position of the next player safely
+    def _get_next_player(self, curr_player:int) -> Player:
+        if curr_player + 1 == self.total_players:
+            return 0
+        return curr_player + 1
 
-    def _get_future_player(self, curr_player:Player, future_player:int) -> Player:
+    def _get_future_player(self, curr_player:int, future_player:int) -> Player:
         for _ in range(future_player):
-            curr_player = self._get_next_player(curr_player.position)
+            curr_player = self._get_next_player(curr_player)
         return curr_player
 
     def _get_player_by_channel(self, channel:str) -> Player:

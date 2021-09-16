@@ -1,6 +1,6 @@
 import json, time, random, math
-from collections import defaultdict
 from typing import List
+from collections import defaultdict
 from channels.generic.websocket import AsyncWebsocketConsumer
 from bet_api.game import Game
 
@@ -9,7 +9,7 @@ DEBUG = True
 
 class GameConsumer(AsyncWebsocketConsumer):
     # Game State information
-    player_games = defaultdict(str) # Each player is connected to a list of their games
+    # player_games = defaultdict(str) # Each player is connected to a list of their games
     votes = defaultdict(list) # Keeps track of votes for each game
     games = defaultdict(Game)
     game_id = ''
@@ -23,8 +23,21 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
 
-        # TEMP: print out request headers
-        print(self.scope['headers'])
+        # Get name from query parameters if sent
+        query_string = self.scope['query_string']
+        ## For some really stupid reason the string is formatted as
+            ## "b'query_params'" where the b'' is part of the string
+            ## So we gotta strip that part
+        query_string = str(query_string)[1:].replace("'","")
+        # set a default name for the player (handled in table consumer)
+        name=''
+        queries = query_string.split('&')
+        # Get the name query only
+        for query in queries:
+            if query.startswith('name'):
+                # Get just the name
+                name = query.split('=')[1]
+                break
 
         # Get the game
         game = self.games[self.game_id]
@@ -33,8 +46,11 @@ class GameConsumer(AsyncWebsocketConsumer):
             self.games[self.game_id] = Game()
             game = self.games[self.game_id]
 
+        if game.table.player_is_in_game(self.channel_name):
+            return
+
         # Add player to game
-        game.table.add_player(channel=self.channel_name)
+        game.table.add_player(channel=self.channel_name, name=name)
         # Add player to channel layer
         await self.channel_layer.group_add(self.game_id, self.channel_name)
 
@@ -124,60 +140,140 @@ class GameConsumer(AsyncWebsocketConsumer):
         ## Play turn
         elif action['type']=='PLAY':
             # Action should have an attribute 'play' that denotes whether its a bet or fold
-            if not self._has_params(action, ['play', 'game_id']):
-                await self._send_fail_message('Need a `play` action and a `game_id`')
+            if not self._has_params(action, ['play']):
+                await self._send_fail_message('Need a `play` action')
                 return
             play = action['play']
-            game_id = action['game_id']
-            amount = action['amount'] if action.__contains__('amount') else None
-            await self.play(play=play, game_id=game_id, bet_size=amount)
+            if play == 'fold':
+                await self.play_fold()
+            else:
+                bet_size = action['bet_size'] if action.__contains__('bet_size') else 0
+                await self.play_bet(bet_size)
             return
-        ## TEST
+        ## Start a new game--gets everything set up for u (might make this automatic instead)
+        elif action['type'] == 'START':
+            await self.start_game()
+        ## TEMP DEGBUG SERVER CALLS
         elif action['type']=='GAME':
             if DEBUG:
                 await self.send(repr(self.games[self.game_id]))
             else:
                 await self.send('Must turn on DEBUG to receive these messages')
+        elif action['type']=='Q':
+            if DEBUG:
+                game = self.games[self.game_id]
+                await self._send_debug_message(str(game.table.queue))
         else:
             await self._send_fail_message('The action type you sent does not exist')
         return
 
     ''' FUNCTIONALITY '''
     ## Betting
-    async def play(self, play:str, game_id:str, bet_size:int=None):
-        if not self._game_exists(game_id):
-            await self._send_fail_message('The game ID you provided does not exist')
+    async def start_game(self) -> None:
+        game = self.games[self.game_id]
+        # Get the positions & start the round
+        positions:dict[str and 'Player'] = game.table.start_round()
+        # start_round should add a player & we can tell everyone whos turn it is
+        curr_player = game.table.curr_player
+        await self.channel_layer.group_send(
+            self.game_id,
+            {
+                'type': 'announce_current_turn',
+                'player': curr_player.name,
+                'owed': game.table.amount_owed()
+            }
+        )
+        # Get the positions to send to the group so tehy can update their state
+        # dealer = positions['dealer'].name
+        # sb = positions['small_blind'].name
+        # bb = positions['big_blind'].name
+        for position, player in positions.items():
+            positions[position] = player.name
+        await self.channel_layer.group_send(
+            self.game_id,
+            {
+                'type': 'announce_positions',
+                'positions': positions
+            }
+        )
+
+    async def play_bet(self, bet_size:int) -> None:
+        game = self.games[self.game_id]
+        # Place the bet
+        try:
+            bet_announcement, \
+            next_player, \
+            new_bet_round, \
+            new_round = game.table.place_bet(channel=self.channel_name, bet_size=bet_size)
+        except ValueError as e:
+            await self._send_fail_message(e)
             return
-        game = self.games[game_id]
-        if play == 'bet':
-            if bet_size is None:
-                await self._send_fail_message('Bet must include a bet size')
-                return
-            try:
-                new_pot = game.place_bet(channel=self.channel_name, bet_size=bet_size)
-            except ValueError as e:
-                await self._send_fail_message(e)
-                return
-            else:
+        except Exception as e:
+            await self._send_fail_message(e)
+            return
+        if DEBUG:
+            bets = game.table.get_bets()
+            await self._send_debug_message(json.dumps(bets))
+        # Announce the bet that was just played & who is up to play next
+        await self.channel_layer.group_send(
+            self.game_id,
+            {
+                'type':'announce_bet',
+                'announcement': bet_announcement
+            }
+        )
+
+        if new_round:
+            await self.channel_layer.group_send(self.game_id,{ 'type':'announce_new_round' })
+        elif new_bet_round:
+            await self.channel_layer.group_send(self.game_id,{
+                'type':'announce_new_bet_round',
+                'bet_round':game.table.bet_round
+            })
+
+        await self.channel_layer.group_send(
+            self.game_id,
+            {
+                'type':'announce_current_turn',
+                'player': next_player,
+                'owed': game.table.amount_owed()
+            }
+        )
+
+    # async def play(self, play:str, game_id:str, bet_size:int=None):
+        # if not self._game_exists(game_id):
+            # await self._send_fail_message('The game ID you provided does not exist')
+            # return
+        # game = self.games[game_id]
+        # if play == 'bet':
+            # if bet_size is None:
+                # await self._send_fail_message('Bet must include a bet size')
+                # return
+            # try:
+                # new_pot = game.place_bet(channel=self.channel_name, bet_size=bet_size)
+            # except ValueError as e:
+                # await self._send_fail_message(e)
+                # return
+            # else:
+                # # await self.channel_layer.group_send(
+                    # # game_id,
+                    # # {
+                        # # 'type':'announce_bet',
+                        # # 'game_id':game_id,
+                        # # 'bet_size':bet_size,
+                    # # }
+                # # )
                 # await self.channel_layer.group_send(
                     # game_id,
                     # {
-                        # 'type':'announce_bet',
-                        # 'game_id':game_id,
-                        # 'bet_size':bet_size,
+                        # 'type':'announce_pot',
+                        # 'pot':new_pot,
                     # }
                 # )
-                await self.channel_layer.group_send(
-                    game_id,
-                    {
-                        'type':'announce_pot',
-                        'pot':new_pot,
-                    }
-                )
-        elif play == 'fold':
-            game.fold(channel=self.channel_name)
-        else:
-            await self._send_fail_message('`play` can only be bet or check')
+        # elif play == 'fold':
+            # game.fold(channel=self.channel_name)
+        # else:
+            # await self._send_fail_message('`play` can only be bet or check')
 
     ## CREATE GAME   
     # async def new_game(self, settings:dict[str and int]=None):
@@ -384,39 +480,39 @@ class GameConsumer(AsyncWebsocketConsumer):
             # self.advance_bet()
 
     ## Play a bet
-    async def play_bet(self, game_id:str, amount:int):
-        betting_round, pot, side_pots, max_bet, _, current_player, players, player_order, all_in = self.get_round_info(game_id)
-        bet_amount = int(amount)
-        # Make sure player is up to play
-        if not (curr_p:=player_order[current_player]) == self.channel_name:
-            await self._send_fail_message('It is not your turn to play')
-            return
-        # Make sure player has enough to bet
-        if bet_amount > self.games[game_id]['players'][curr_p]['chips']:
-            await self._send_fail_message('You do not have enough chips to bet that much')
-            return
-        # Make sure the bet is big enough (dont check for doubling on the raise for now)
-        if bet_amount < max_bet:
-            await self._send_fail_message(f'Bet must be at least equal to the max: {max_bet}')
-            return
-        # If the bet is over the max_bet, update it
-        self.games[game_id]['round']['max_bet'] = max(max_bet,bet_amount)
-        # Update game state
-        ## Check if player is going all in
-        if bet_amount == self.games[game_id]['players'][self.channel_name]['chips']:
-            self.games[game_id]['round']['all_in'].append(self.channel_name)
-            self.games[game_id]['round']['players'].__delitem__(self.channel_name)
-        ## Add bet to pot if no one is all in
-        if all_in == []:
-            self.games[game_id]['round']['pot'] += bet_amount
-            # Add bet amount to player dict
-            self.games[game_id]['round']['players'][self.channel_name] += bet_amount
-        else:
-            # Hash a tuple of the players in order and add the pot amount
-            self.games[game_id]['round']['side_pots'][tuple(players.keys())] += bet_amount
-        # Take money out of personal chips
-        self.games[game_id]['players'][self.channel_name]['chips'] -= bet_amount
-        await self.advance_bet()
+    # async def play_bet(self, game_id:str, amount:int):
+        # betting_round, pot, side_pots, max_bet, _, current_player, players, player_order, all_in = self.get_round_info(game_id)
+        # bet_amount = int(amount)
+        # # Make sure player is up to play
+        # if not (curr_p:=player_order[current_player]) == self.channel_name:
+            # await self._send_fail_message('It is not your turn to play')
+            # return
+        # # Make sure player has enough to bet
+        # if bet_amount > self.games[game_id]['players'][curr_p]['chips']:
+            # await self._send_fail_message('You do not have enough chips to bet that much')
+            # return
+        # # Make sure the bet is big enough (dont check for doubling on the raise for now)
+        # if bet_amount < max_bet:
+            # await self._send_fail_message(f'Bet must be at least equal to the max: {max_bet}')
+            # return
+        # # If the bet is over the max_bet, update it
+        # self.games[game_id]['round']['max_bet'] = max(max_bet,bet_amount)
+        # # Update game state
+        # ## Check if player is going all in
+        # if bet_amount == self.games[game_id]['players'][self.channel_name]['chips']:
+            # self.games[game_id]['round']['all_in'].append(self.channel_name)
+            # self.games[game_id]['round']['players'].__delitem__(self.channel_name)
+        # ## Add bet to pot if no one is all in
+        # if all_in == []:
+            # self.games[game_id]['round']['pot'] += bet_amount
+            # # Add bet amount to player dict
+            # self.games[game_id]['round']['players'][self.channel_name] += bet_amount
+        # else:
+            # # Hash a tuple of the players in order and add the pot amount
+            # self.games[game_id]['round']['side_pots'][tuple(players.keys())] += bet_amount
+        # # Take money out of personal chips
+        # self.games[game_id]['players'][self.channel_name]['chips'] -= bet_amount
+        # await self.advance_bet()
 
         
     # Helper Functions
@@ -465,10 +561,10 @@ class GameConsumer(AsyncWebsocketConsumer):
             
     
     ## Get and send all round information
-    def get_round_info(self, game_id:str):
-        bet_round = self.games[game_id]['round']
-        betting_round, pot, side_pots, max_bet, starting_player, current_player, players, player_order, all_in = bet_round.values()
-        return betting_round, pot, side_pots, max_bet, starting_player, current_player, players, player_order, all_in
+    # def get_round_info(self, game_id:str):
+        # bet_round = self.games[game_id]['round']
+        # betting_round, pot, side_pots, max_bet, starting_player, current_player, players, player_order, all_in = bet_round.values()
+        # return betting_round, pot, side_pots, max_bet, starting_player, current_player, players, player_order, all_in
 
     ''' ANNOUNCEMENTS '''
     # Announces to all the clients that we are starting the ordering process
@@ -505,10 +601,26 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     # Announce to everyone else when someone makes a bet so their clients update
     async def announce_bet(self, event):
-        game_id, bet_size = event['game_id'], event['bet_size']
+        await self.send(json.dumps(event['announcement']))
 
     async def announce_pot(self, pot):
         await self.send(pot)
+
+    async def announce_positions(self, positions:dict[str]):
+        await self.send(json.dumps(positions))
+
+    async def announce_current_turn(self, event:dict[str]):
+        await self.send(json.dumps({'to_play':event['player'], 'bet_owed':event['owed']}))
+
+    async def announce_new_round(self, event:dict[str]):
+        await self.send(json.dumps({'type':'new_round'}))
+
+    async def announce_new_bet_round(self, event:dict[str]):
+        bet_rounds = {1:'flop',2:'turn',3:'river'}
+        await self.send(json.dumps({
+            'type':'next_bet_round',
+            'bet_round':bet_rounds[event['bet_round']]
+        }))
 
     ''' USEFUL FUNCTIONS '''
     def _verify_player_in_game(self):
@@ -524,8 +636,11 @@ class GameConsumer(AsyncWebsocketConsumer):
             return True
 
     async def _send_fail_message(self, msg:str) -> None:
-        await self.send(json.dumps({'status':'fail','message':msg}))
+        await self.send(json.dumps({'status':'fail','message':str(msg)}))
         return
+
+    async def _send_debug_message(self, msg:str) -> None:
+        await self.send(json.dumps({'DEBUG':str(msg)}))
 
     # @param index // 0=ordering, 1=voting
 

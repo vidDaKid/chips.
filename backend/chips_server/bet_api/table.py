@@ -17,6 +17,9 @@ class Table:
         # @var pot // Holds all the pot state
         self.pot = Pots()
 
+        # @var bet_round // Tracks the current round we're in
+        self.bet_round:int = 0 # 0->4 == pre_flop -> river
+
         # @var dealer // tracks which position is the dealer
         self.dealer = 0
 
@@ -28,82 +31,181 @@ class Table:
         # @var vote_count // storing votes from each player (anonymously)
         self.vote_count = {True:0,False:0} # False=reject, True=accept
 
-        # @var blinds
-        # self.small_blind = self._get_next_player(self.players[self.dealer])
-        # self.big_blind = self._get_future_player(self.players[self.dealer], 2)
-        
         # @var min_raise // holds the smallest amount a player can raise by
         self.min_raise_set:bool = False
         self.min_raise:int = 0
         # @var curr_bet // bets the minimum amount a player needs to bet
         self.curr_bet:int = 0
 
+        # @var first_bet // keeps track of whether or not the first player has bet
+        self.first_bet:bool = False
+        # @var last_raise // the last person to raise the bet (round ends before them)
+        self.last_raise:Player = None
+        # @var curr_player // the player who is up to play
+        self.curr_player:Player = None
+
+    # RESET FUNCTIONS
+    def reset_bet_round(self) -> None:
+        self.first_bet = False
+        self.last_raise = self.curr_player = None
+        self.min_raise_set = False
+        self.min_raise = self.curr_bet = 0
+        ## Reset player counts
+        for player in self.players:
+            player.curr_bet = 0
+        ## iterate bet round
+        self.bet_round += 1
+
+    def reset_round(self) -> None:
+        # Maybe get rid of ppl w no chips too ?
+        self.reset_bet_round()
+        self.bet_round = 0
+        self.pot = Pots()
+        ## Reset players
+        for player in self.players:
+            self.folded = False
+            self.all_in = False
+        ## Iterate starting dealer
+        self.dealer = self._get_future_index(1)
+
     # BET FUNCTIONS
-    def place_bet(self, channel:str, bet_size:int) -> None:
+    def place_bet(self, channel:str, bet_size:int) -> dict[str] and str:
         player = self._get_player_by_channel(channel)
         # Make sure player is up to vote
-        ''' SELF.CURRENT PLAYER == PLAYER '''
+        if self.curr_player is not player:
+            raise Exception('You are not currently up to play')
         # Make sure the bet is legit
         valid, err_msg = player.bet_is_valid(bet_size)
         if not valid:
             raise ValueError(err_msg)
 
-        # Create a new bet to add to the pot
-        bet = Bet(bet_size=bet_size, player=player)
-        ## Then add the bet to the pot
-        self.pots += bet
+        if bet_size < (o:=self.amount_owed(channel)):
+            raise ValueError(f'Error! You must bet at least {o}')
 
-        # Then add the bet to the player obj
+        # Add the bet to the player
         player.add_bet(bet_size)
 
-    def play_blinds(self) -> None:
+        # Check for raise
+        if bet_size > self.curr_bet:
+            # u have to raise by the smallest bet, otherwise its not a valid raise
+            if bet_size < (self.min_raise + self.curr_bet):
+                raise ValueError(f'Raises must be at least {self.curr_bet} over the current bet')
+            # update new current bet and new last raiser
+            self.curr_bet = bet_size
+            self.last_raise = player
+            # Update the min_raise if no one has set it yet
+            if ( not self.min_raise_set ) and ( bet_size > 0 ):
+                self.min_raise = bet_size
+                self.min_raise_set = True
+
+        if not self.first_bet:
+            self.first_bet = True
+            self.last_raise = player
+
+        # Check for new betting round
+        if self.queue[-1] is self.last_raise:
+            ''' NEW BET ROUND '''
+            # self.new_bet_round = True
+            next_round:bool = self.next_bet_round()
+            # if new_round:
+                # self.new_round()
+            return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, True, next_round
+        
+
+        # move to the next better and send it to the consumer
+        self.advance_bet()
+
+        # Announcements to send to client
+            # [ bet_announcement, to_play, new_bet_round, new_round ]
+        return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, False, False
+
+        # Create a new bet to add to the pot
+        # bet = Bet(bet_size=bet_size, player=player)
+        ## Then add the bet to the pot
+        # self.pots += bet
+
+    def play_blinds(self, player_sb:Player=None, player_bb:Player=None) -> None:
         # Get the blinds
-        player_sb = self.players[self.st_player+1]
-        player_bb = self.players[self.st_player+2]
+        player_sb = player_sb or self._get_next_player(self.players[self.dealer])
+        player_bb = player_bb or self._get_future_player(2, self.players[self.dealer])
         # Get blinds
         big_blind = self.settings['big_blind']
         small_blind = round(big_blind/2)
         # Add small_blind bet
-        sb_bet_size = max(small_blind, player_sb.c_count)
-        # if sb_bet_size == player_sb.c_count:
-            # self.
-
+        sb_bet_size = min(small_blind, player_sb.c_count)
+        player_sb.add_bet(sb_bet_size)
+        # Add big blind bet
+        bb_bet_size = min(big_blind, player_bb.c_count)
+        player_bb.add_bet(bb_bet_size)
+        # Update game state
+        self.min_raise = big_blind
+        self.min_raise_set = True
+        self.curr_bet = big_blind
 
     def fold(self, channel:str) -> None:
         player = self._get_player_by_channel(channel)
         player.fold()
 
-    def start_round(self) -> None:
+    # Starts the round and returns a dictionary containing the dealer, small blind, & big blind
+    def start_round(self) -> dict[str and Player]:
         # We want to create a queue of everyone playing in this iteration
         # Since the st_player is dealer, we need the player 3 after in order to start after BB
-        player_after_bb:int = self._get_future_player(self.st_player, 3)
-        # we want a list of players starting w him & ending w person before him to iterate thru
-        temp_players = self.players[players_after_bb:] + self.players[:player_after_bb]
-        # Turn this into an iterable to save memory and more importantly iterate thru it easier
-        self.queue = iter(temp_players)
-    
+        ## Order players
+        self.order_players()
+        ## Get the starting player
+        st_player = self.players[self.dealer]
+        ## Make a queue starting from the 3rd player after the starting player (excluding blinds)
+        self.create_queue(pre_flop=True)
+        # update game state
         # Get the game ready for the round
         ## Reset the pot
         self.pot.reset()
+        ## Get both the blinds
+        player_sb = self._get_next_player(self.players[self.dealer])
+        player_bb = self._get_future_player(2, self.players[self.dealer])
         ## add bets to the blinds
+        self.play_blinds()
+        # Return a dictionary of the dealer & blinds
+        return {'dealer':st_player, 'small_blind':player_sb, 'big_blind':player_bb}
 
+    def end_round(self) -> None:
+        ''' VOTE ON WINNER '''
+        self.dealer += 1
+        for player in self.players:
+            player.reset_round()
 
+    # For now it just returns a bool of whether or not we need to go to the next round
+    def advance_bet(self) -> None:
+        self.curr_player = self.queue.pop()
+        if self.queue == []:
+            # Check for whether or not its preflop
+            pre_flop = True if self.bet_round == 0 else False
+            self.create_queue(update_curr=False, pre_flop=pre_flop)
 
+    # def start_betting_round(self) -> None:
+        # # Same as start_round
+        # self.queue = iter([x for x in self.players[self.dealer+1:] + self.players[:self.dealer+1] if not x.folded])
+        # # Make sure old side pots are deactivated for new round
+        # self.pot.next_bet_round()
 
-        # Create a temporary list of all the players starting from 3 after the starting player (so the person after the big blind)
-        temp_players =  self.players[self.st_player+3:] + self.players[:self.st_player+3] 
-        # Create a queue of the non folded players for this iteration
-        # This way we can iterate through it as we need the current player
-        self.queue = iter([x for x in temp_players if not x.folded])
-        # Reset the pot for the round
-        self.pot.reset()
+    # Advances the bet round and returns True if its the end of the round
+    def next_bet_round(self) -> bool:
+        if self.bet_round == 3:
+            # NEW ROUND #
+            self.reset_round()
+            self.create_queue()
+            return True
+        # Advance bet round state
+        self.reset_bet_round()
+        # get a new queue for the next round
+        self.create_queue()
+        return False
 
-    def start_betting_round(self) -> None:
-        # Same as start_round
-        self.queue = iter([x for x in self.players[self.st_player+1:] + self.players[:self.st_player+1] if not x.folded])
-        # Make sure old side pots are deactivated for new round
-        self.pot.next_bet_round()
-
+    def get_bets(self) -> None:
+        output = dict()
+        for player in self.players:
+            output[player.name] = player.curr_bet
+        return output
 
     # PLAYER FUNCTIONS
     def add_player(self, channel:str, name:str='', c_count:int=None) -> None:
@@ -149,6 +251,12 @@ class Table:
         player.vote()
         self.vote_count[vote] += 1
 
+    def amount_owed(self, channel:str='') -> int:
+        if not channel:
+            return self.curr_bet - self.curr_player.curr_bet
+        player = self._get_player_by_channel(channel)
+        return self.curr_bet - player.curr_bet
+
     # SETUP FUNCTIONS
     def reset_voting(self) -> None:
         for player in self.players:
@@ -186,16 +294,53 @@ class Table:
 
 
     # HELPER FUNCTIONS
-    ## Get the position of the next player safely
-    def _get_next_player(self, curr_player:int) -> Player:
-        if curr_player + 1 == self.total_players:
-            return 0
-        return curr_player + 1
+    ## Create a new queue and update the current player
+    def create_queue(self, pre_flop:bool=False, update_curr:bool=True) -> None:
+        # Create a new queue for the next round
+        num_after_dealer = 3 if pre_flop else 1 # Starts after bb if preflop
+        # st_player = self._get_future_player(num_after_dealer)
+        # st_idx = self.players.index(st_player)
+        st_idx = self._get_future_index(num_after_dealer)
+        temp_q = reversed(self.players[st_idx:] + self.players[:st_idx])
+        self.queue = [x for x in temp_q if not (x.folded or x.all_in)]
+        # Get the first player to play
+        if update_curr:
+            self.curr_player = self.queue.pop()
 
-    def _get_future_player(self, curr_player:int, future_player:int) -> Player:
+    ## Get the position of the next player safely
+    def _get_next_player(self, player:Player=None) -> Player:
+        # assume player is dealer if not player
+        if not player:
+            player = self.players[self.dealer]
+        if (idx:=self.players.index(player)) == (len(self.players) - 1):
+            return self.players[0]
+        else:
+            return self.players[idx+1]
+        # If theres no player, then they want the next to play, check the queu
+        # if (not player) or (player is self.curr_player):
+            # return self.queue[-1]
+        # Otherwise get the player one before the one they want
+        # player_idx = self.queue.index(player)
+        # return self.queue[player_idx-1]
+
+    # This entire function just calls _get_next_player over and over again
+    def _get_future_player(self, future_player:int, player:Player=None) -> Player:
+        # Get player based on play position if not specified
+        if not player:
+            # Will find future player after dealer
+            player = self.players[self.dealer]
         for _ in range(future_player):
-            curr_player = self._get_next_player(curr_player)
-        return curr_player
+            player = self._get_next_player(player=player)
+        return player
+
+    def _get_future_index(self, future_index:int, st_index:int=None) -> int:
+        st_index = st_index or self.dealer
+        # Get the summed index and get rid of overflow with a modulus
+        return (st_index+future_index) % len(self.players)
+    
+    # Gets the player w the lowest position
+    def _get_starting_player(self) -> Player:
+        return min(self.players, key=lambda x: x.position)
 
     def _get_player_by_channel(self, channel:str) -> Player:
         for player in self.players:

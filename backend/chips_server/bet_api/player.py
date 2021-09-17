@@ -2,6 +2,7 @@
 This module holds all the information for each individual player
 '''
 from typing import Optional, List
+import uuid
 
 class Player:
     def __init__(self, channel:str, name:str=None, c_count:Optional[int]=None):
@@ -13,6 +14,9 @@ class Player:
         self.c_count:int = c_count or 0
         # @var name // player nickname
         self.name:str = name or 'Player ' + str(self.position)
+
+        # @var secret // so users can get their player back
+        self.secret = self.generate_secret()
 
         # ROUND STATE
         ## @var curr_bet // the current bet for the betting round
@@ -37,6 +41,9 @@ class Player:
 
     def __repr__(self) -> str:
         return str({'Position':self.position, 'Chip Count':self.c_count, 'Name':self.name})
+
+    def generate_secret(self) -> str:
+        return str(uuid.uuid4())
 
 # BET FUNCTIONS
     def add_bet(self, bet_size:int) -> None:

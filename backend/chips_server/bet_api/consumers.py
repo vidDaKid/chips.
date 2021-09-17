@@ -24,20 +24,20 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
 
         # Get name from query parameters if sent
-        query_string = self.scope['query_string']
+        # query_string = self.scope['query_string']
         ## For some really stupid reason the string is formatted as
             ## "b'query_params'" where the b'' is part of the string
             ## So we gotta strip that part
-        query_string = str(query_string)[1:].replace("'","")
+        # query_string = str(query_string)[1:].replace("'","")
         # set a default name for the player (handled in table consumer)
-        name=''
-        queries = query_string.split('&')
+        # name=''
+        # queries = query_string.split('&')
         # Get the name query only
-        for query in queries:
-            if query.startswith('name'):
-                # Get just the name
-                name = query.split('=')[1]
-                break
+        # for query in queries:
+            # if query.startswith('name'):
+                # # Get just the name
+                # name = query.split('=')[1]
+                # break
 
         # Get the game
         game = self.games[self.game_id]
@@ -50,12 +50,22 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
 
         # Add player to game
-        game.table.add_player(channel=self.channel_name, name=name)
+        # game.table.add_player(channel=self.channel_name)
         # Add player to channel layer
         await self.channel_layer.group_add(self.game_id, self.channel_name)
 
         # Accept connection
         await self.accept()
+
+        # Send them the players that are already in the group
+        if len(game.table.players) > 0:
+            await self.send(json.dumps({
+                'type':'PLAYERS',
+                'players':[{'player':x.name,'c_count':x.c_count} for x in game.table.players]
+            }))
+
+        # save the session
+        # self.scope['session'].save()
         return
 
     async def disconnect(self, close_code):
@@ -109,8 +119,22 @@ class GameConsumer(AsyncWebsocketConsumer):
                 # await self.send(json.dumps({'status':'fail','message':'Include game_id to get game state'}))
                 # return
             # await self.game_status(game_id)
+        ## Join a game
+        if action['type']=='JOIN':
+            name = ''
+            if self._has_params(action, ['name']):
+                name = action['name']
+            await self.join_game(name=name)
+        ## Get ur player back w the secret
+        elif action['type']=='SECRET_JOIN':
+            if self._has_params(action, ['secret']):
+                secret = action['secret']
+            else:
+                await self._send_fail_message('Cannot find your old player without a secret')
+                return
+            await self.join_with_player_secret(secret)
         ## Get order of players
-        if action['type']=='ORDER':
+        elif action['type']=='ORDER':
             await self.order_players()
         ## Get Counted for the order
         elif action['type']=='COUNT':
@@ -148,7 +172,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 await self.play_fold()
             else:
                 bet_size = action['bet_size'] if action.__contains__('bet_size') else 0
-                await self.play_bet(bet_size)
+                await self.play_bet(int(bet_size))
             return
         ## Start a new game--gets everything set up for u (might make this automatic instead)
         elif action['type'] == 'START':
@@ -159,15 +183,45 @@ class GameConsumer(AsyncWebsocketConsumer):
                 await self.send(repr(self.games[self.game_id]))
             else:
                 await self.send('Must turn on DEBUG to receive these messages')
-        elif action['type']=='Q':
+        elif action['type']=='POTS':
             if DEBUG:
                 game = self.games[self.game_id]
-                await self._send_debug_message(str(game.table.queue))
+                await self._send_debug_message(str(game.table.pot))
+        # elif action['type']=='BETS':
+            # if DEBUG:
+                # game = self.games[
         else:
             await self._send_fail_message('The action type you sent does not exist')
         return
 
     ''' FUNCTIONALITY '''
+    ## GAME
+    async def join_game(self, name:str) -> None:
+        game = self.games[self.game_id]
+        name, c_count, secret = game.table.add_player(channel=self.channel_name, name=name)
+        # if is_in_game:
+            # await self._send_fail_message('Player already in game')
+            # return
+        # Send the secret to the client
+        await self.send(json.dumps({'type':'SECRET','secret':secret}))
+        # announce to everyone that u joined the game
+        await self.channel_layer.group_send(
+            self.game_id,
+            {
+                'type':'announce_new_player',
+                'player':name,
+                'c_count':c_count,
+            }
+        )
+    ## Get old player back
+    async def join_with_player_secret(self, secret:str) -> None:
+        game = self.games[self.game_id]
+        try:
+            name, c_count = game.table.update_player_secret(channel=self.channel_name, secret=secret)
+        except KeyError as e:
+            await self._send_fail_message(e)
+            return
+        await self.send({'type':'SECRET_PLAYER','player':name,'c_count':c_count})
     ## Betting
     async def start_game(self) -> None:
         game = self.games[self.game_id]
@@ -201,25 +255,26 @@ class GameConsumer(AsyncWebsocketConsumer):
         game = self.games[self.game_id]
         # Place the bet
         try:
-            bet_announcement, \
+            announcement, \
             next_player, \
             new_bet_round, \
             new_round = game.table.place_bet(channel=self.channel_name, bet_size=bet_size)
         except ValueError as e:
             await self._send_fail_message(e)
             return
-        except Exception as e:
+        except KeyError as e:
             await self._send_fail_message(e)
             return
         if DEBUG:
             bets = game.table.get_bets()
-            await self._send_debug_message(json.dumps(bets))
+            await self._send_debug_message(str(bets))
         # Announce the bet that was just played & who is up to play next
         await self.channel_layer.group_send(
             self.game_id,
             {
                 'type':'announce_bet',
-                'announcement': bet_announcement
+                'player': announcement['player'],
+                'bet_size': announcement['bet_size']
             }
         )
 
@@ -236,6 +291,18 @@ class GameConsumer(AsyncWebsocketConsumer):
             {
                 'type':'announce_current_turn',
                 'player': next_player,
+                'owed': game.table.amount_owed()
+            }
+        )
+
+    async def play_fold(self) -> None:
+        game = self.games[self.game_id]
+        player = game.table.fold(self.channel_name)
+        await self.channel_layer.group_send(self.game_id, {'type':'announce_fold', 'player':player})
+        await self.channel_layer.group_send(self.game_id, 
+            {
+                'type':'announce_current_turn',
+                'player':game.table.curr_player.name,
                 'owed': game.table.amount_owed()
             }
         )
@@ -362,19 +429,34 @@ class GameConsumer(AsyncWebsocketConsumer):
         if not game.ordering:
             await self._send_fail_message('Ordering is not currently active')
             return
-        game.table.set_player_position(self.channel_name)
+
+        # Count the vote in the table
+        try:
+            name, position = game.table.set_player_position(self.channel_name)
+        except ValueError as e:
+            await self._send_fail_message(e)
+            return
+        # if DEBUG:
+            # await self.send(repr(game.table._get_player_by_channel(self.channel_name)))
+        # Send ur new position to everyone in the game
+        await self.channel_layer.group_send(self.game_id,
+            {
+                'type':'POSITION',
+                'player':name,
+                'position':position
+            }
+        )
+
         ordering_completed = game.table.voting_is_finished()
-        if DEBUG:
-            await self.send(repr(game.table._get_player_by_channel(self.channel_name)))
         if ordering_completed:
             game.table.order_players()
             game.set_ordering_free()
-            await self.channel_layer.group_send(
-                self.game_id,
-                {
-                    'type':'announce_order'
-                }
-            )
+            # await self.channel_layer.group_send(
+                # self.game_id,
+                # {
+                    # 'type':'announce_order'
+                # }
+            # )
         return
 
         # Make sure ordering is active
@@ -585,15 +667,15 @@ class GameConsumer(AsyncWebsocketConsumer):
         # self._set_game_busy(event['game_id'], 1) # Busy up game voting
         # self.votes[event['game_id']] = list()
         game = self.games[self.game_id]
-        game.set_voting_busy() # set game state
         game.table.reset_voting() # Reset voting game state
+        game.set_voting_busy() # set game state
         # Announce voting param
         agenda = event['voting_param']
-        await self.send(json.dumps({'status':'action','action':'VOTE','agenda':agenda}))
+        await self.send(json.dumps({'type':'START_VOTE','voting_param':agenda}))
 
     # This function gets the vote winner and announces it // resets game voting
     async def announce_vote_result(self, event):
-        await self.send(json.dumps({'status':'result','result':event['vote']}))
+        await self.send(json.dumps({'status':'VOTE_RESULT','result':event['vote']}))
         # self._set_game_active(event['game_id'], 1) # Turn off voting busy for the game
         game = self.games[self.game_id]
         game.table.reset_voting()
@@ -601,7 +683,7 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     # Announce to everyone else when someone makes a bet so their clients update
     async def announce_bet(self, event):
-        await self.send(json.dumps(event['announcement']))
+        await self.send(json.dumps({'type':'BET','player':event['player'],'bet_size':event['bet_size']}))
 
     async def announce_pot(self, pot):
         await self.send(pot)
@@ -609,18 +691,27 @@ class GameConsumer(AsyncWebsocketConsumer):
     async def announce_positions(self, positions:dict[str]):
         await self.send(json.dumps(positions))
 
+    async def announce_position(self, event:dict[str]):
+        await self.send(json.dumps({"type":'ORDERING','player':event['player'],'c_count':event['c_count']}))
+
     async def announce_current_turn(self, event:dict[str]):
-        await self.send(json.dumps({'to_play':event['player'], 'bet_owed':event['owed']}))
+        await self.send(json.dumps({'type':'TO_PLAY','to_play':event['player'], 'owed':event['owed']}))
 
     async def announce_new_round(self, event:dict[str]):
-        await self.send(json.dumps({'type':'new_round'}))
+        await self.send(json.dumps({'type':'NEW_ROUND'}))
 
     async def announce_new_bet_round(self, event:dict[str]):
         bet_rounds = {1:'flop',2:'turn',3:'river'}
         await self.send(json.dumps({
-            'type':'next_bet_round',
+            'type':'NEW_BET_ROUND',
             'bet_round':bet_rounds[event['bet_round']]
         }))
+
+    async def announce_fold(self, event:dict[str]):
+        await self.send(json.dumps(event['announcement']))
+
+    async def announce_new_player(self, event:dict[str]):
+        await self.send(json.dumps({'type':'NEW_PLAYER','player':event['player'],'c_count':event['c_count']}))
 
     ''' USEFUL FUNCTIONS '''
     def _verify_player_in_game(self):
@@ -636,7 +727,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             return True
 
     async def _send_fail_message(self, msg:str) -> None:
-        await self.send(json.dumps({'status':'fail','message':str(msg)}))
+        await self.send(json.dumps({'type':'FAIL','message':str(msg)}))
         return
 
     async def _send_debug_message(self, msg:str) -> None:

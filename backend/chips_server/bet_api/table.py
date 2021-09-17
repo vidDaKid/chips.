@@ -3,7 +3,7 @@ TABLE
 holds all the information for each table (i.e. a list of players in a game)
 '''
 from bet_api.player import Player
-from bet_api.bet import Bet
+from bet_api.bet import Bet, RoundBets
 from bet_api.pot import Pots
 from typing import Optional, List
 
@@ -13,6 +13,8 @@ class Table:
         self.players:List[Player] = list()
         # @var queue // all the non folded players in the current iteration
         self.queue:List[Player] = list()
+        # @var removed // players that lost connection, may join back
+        self.removed:List[Player] = list()
 
         # @var pot // Holds all the pot state
         self.pot = Pots()
@@ -73,7 +75,7 @@ class Table:
         player = self._get_player_by_channel(channel)
         # Make sure player is up to vote
         if self.curr_player is not player:
-            raise Exception('You are not currently up to play')
+            raise KeyError('You are not currently up to play')
         # Make sure the bet is legit
         valid, err_msg = player.bet_is_valid(bet_size)
         if not valid:
@@ -82,16 +84,14 @@ class Table:
         if bet_size < (o:=self.amount_owed(channel)):
             raise ValueError(f'Error! You must bet at least {o}')
 
-        # Add the bet to the player
-        player.add_bet(bet_size)
-
         # Check for raise
-        if bet_size > self.curr_bet:
+        total_bet = bet_size + player.curr_bet
+        if total_bet > self.curr_bet:
             # u have to raise by the smallest bet, otherwise its not a valid raise
-            if bet_size < (self.min_raise + self.curr_bet):
+            if total_bet < (self.min_raise + self.curr_bet):
                 raise ValueError(f'Raises must be at least {self.curr_bet} over the current bet')
             # update new current bet and new last raiser
-            self.curr_bet = bet_size
+            self.curr_bet = total_bet
             self.last_raise = player
             # Update the min_raise if no one has set it yet
             if ( not self.min_raise_set ) and ( bet_size > 0 ):
@@ -105,13 +105,13 @@ class Table:
         # Check for new betting round
         if self.queue[-1] is self.last_raise:
             ''' NEW BET ROUND '''
-            # self.new_bet_round = True
             next_round:bool = self.next_bet_round()
             # if new_round:
                 # self.new_round()
             return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, True, next_round
         
-
+        # Add the bet to the player
+        player.add_bet(bet_size)
         # move to the next better and send it to the consumer
         self.advance_bet()
 
@@ -142,9 +142,11 @@ class Table:
         self.min_raise_set = True
         self.curr_bet = big_blind
 
-    def fold(self, channel:str) -> None:
+    def fold(self, channel:str) -> str:
         player = self._get_player_by_channel(channel)
         player.fold()
+        self.advance_bet()
+        return player.name
 
     # Starts the round and returns a dictionary containing the dealer, small blind, & big blind
     def start_round(self) -> dict[str and Player]:
@@ -174,6 +176,11 @@ class Table:
         for player in self.players:
             player.reset_round()
 
+    # Add bets to the pot
+    def end_bet_round(self) -> None:
+        ''' ADD BETS TO POT '''
+        pass
+
     # For now it just returns a bool of whether or not we need to go to the next round
     def advance_bet(self) -> None:
         self.curr_player = self.queue.pop()
@@ -190,6 +197,12 @@ class Table:
 
     # Advances the bet round and returns True if its the end of the round
     def next_bet_round(self) -> bool:
+        # Add bets to pot
+        bet = RoundBets()
+        for player in self.players:
+            bet.add_bet_from_player(player)
+        self.pot += bet
+        # Check for new round
         if self.bet_round == 3:
             # NEW ROUND #
             self.reset_round()
@@ -208,7 +221,10 @@ class Table:
         return output
 
     # PLAYER FUNCTIONS
-    def add_player(self, channel:str, name:str='', c_count:int=None) -> None:
+    def add_player(self, channel:str, name:str='', c_count:int=None) -> str and int:
+        if self.player_is_in_game(channel=channel):
+            player = self._get_player_by_channel(channel=channel)
+            return player.name, player.c_count
         if c_count is None:
             c_count = self.settings['default_count']
         if name == '':
@@ -216,18 +232,32 @@ class Table:
         new_player = Player(channel=channel, name=name, c_count=c_count) # Make a player
         new_player.position = len(self.players) # put them in the last position
         self.players.append(new_player) # Add them to the table
+        return name, c_count, new_player.secret
     
     def remove_player(self, channel:str) -> None:
         player = self._get_player_by_channel(channel)
         self.players.remove(player)
+        self.removed.append(player)
+
+    def update_player_secret(self, channel:str, secret:str) -> None:
+        for player in list(self.removed):
+            if player.secret == secret:
+                player.channel = channel
+                self.removed.remove(player)
+                self.players.append(player)
+                self.order_players()
+                return player.name, player.c_count
+        else:
+            raise KeyError('No player found with the secret key you provided')
 
     def set_player_position(self, channel:str) -> None:
         player = self._get_player_by_channel(channel)
         if player.voted:
-            return
+            raise ValueError('Player has already voted')
         player.position = self.count
         player.voted = True
         self.count += 1
+        return player.name, player.position
  
     def order_players(self) -> None:
         self.players.sort(key=lambda x: x.position)

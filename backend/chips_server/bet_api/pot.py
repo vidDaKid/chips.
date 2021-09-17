@@ -2,7 +2,8 @@
 This contains all the logic for handling bets in the pot. Obviously.
 '''
 from collections import defaultdict
-from bet_api.bet import Bet
+from bet_api.bet import Bet, RoundBets
+from typing import List, Optional
 
 class Pot:
     def __init__(self, value:int=0, max_bet:int=float('inf')):
@@ -13,11 +14,15 @@ class Pot:
             # In the case that a second person goes all in for lower, the max bet is dropped and the difference is turned into a new pot
         self.max_bet:int = max_bet
 
-        # @var bets // how much each player has bet to the pot
-        self.bets = defaultdict(int) # { Player : bet_size }
-        
         # @var eligible // players that contributed to the pot are eligible to win it
-        self.eligible:List['Player'] = list()
+        self.eligible:List[str] = list() # list of channels
+
+    @classmethod
+    def new_all_in_pot(cls, bet_size:int, inherited_val:int, channel:str):
+        new_pot = cls(value=bet_size+inherited_val, max_bet=bet_size)
+        new_pot.eligible.append(channel)
+        return new_pot
+
 
     # MAIN FUNCTIONALITY
     def add_all_in(self, bet:Bet) -> None:
@@ -44,8 +49,8 @@ class Pot:
         return new_pot
 
     # BUILT IN
-    def __add__(self, bet:'Bet') -> None:
-        raise ValueError('Cannot create temporary pot')
+    def __add__(self, bet:tuple[int and str]) -> None:
+        return self.val + bet[0]
         # if type(bet) == tuple:
             # bet_size:int, player:'Player' = bet
             # if bet_size > self.max_bet:
@@ -56,36 +61,68 @@ class Pot:
         # else:
             # raise TypeError('A pot can only be added to an `int` or another `Pot`')
 
-    def __iadd__(self, bet:Bet) -> 'Pot':
-        if isinstance(bet, Bet):
-            if bet.bet_size > self.max_bet:
-                raise ValueError('Bet is larger than max bet value')
-            self.val += bet.bet_size
-            self.bets[bet.player] += bet.bet_size
-            return self
-        else:
-            raise TypeError('Only a `Bet` object can be added to a pot')
+    # Accepts a tuple of a bet_size and channel_name
+    def __iadd__(self, bet:tuple[int and str]) -> int:
+        self.val += bet[0]
+        self.eligible.append(bet[1])
+        return self
+        # if isinstance(bet, Bet):
+            # if bet.bet_size > self.max_bet:
+                # raise ValueError('Bet is larger than max bet value')
+            # self.val += bet.bet_size
+            # self.bets[bet.player] += bet.bet_size
+            # return self
+        # else:
+            # raise TypeError('Only a `Bet` object can be added to a pot')
 
     def __repr__(self) -> str:
-        return str({'Value':self.val,'max bet':self.max_bet})
+        return str({'Value':self.val,'max bet':self.max_bet,'eligible':self.eligible})
         # return f'\tValue: {self.val}\n\tMax Bet: {self.max_bet}'
+
+class BottomlessPot:
+    def __init__(self, val:int=0):
+        self.val = val
+
+    def __add__(self, other:int) -> int:
+        return self.val + other
+
+    def __iadd__(self, other:int) -> int:
+        self.val += other
+        return self
+
+    def empty(self) -> None:
+        self.val = 0
 
 
 class Pots:
     def __init__(self):
         # @var pots // list of all the side pots
-        self.pots:List[Pot] = [Pot()]
+        self.pots:List[Pot] = list()
     
-    # MAIN FUNCTIONS
-    ## Adds bets for all in players
-    # def add_all_in(self, amount:int) -> 'Pots':
-        # self._add_safe(amount, True)
-        # return self
-
+        # @var bottomless_pot // the pot without a limit 
+        self.bottomless_pot:BottomlessPot = BottomlessPot()
+    
     # Resets at the beginning of each new round
-    def reset(self) -> 'Pots':
-        self.pots = [Pot()]
-        return self
+    def reset(self) -> None:
+        self.pots = list()
+        self.bottomless_pot = BottomlessPot()
+
+    def add_bet_round_bets(self, bets:RoundBets) -> None:
+        bets.sort()
+        for bet in bets.bets:
+            # 1st put whatever u can in each pot
+            for pot in self.pots:
+                amount = min(bet.bet_size, pot.max_bet)
+                pot += (amount, bet.channel)
+                bet.bet_size -= amount
+            if ( bet.bet_size > 0 ) and bet.all_in:
+                new_pot = Pot.new_all_in_pot(bet.bet_size, self.bottomless_pot.val, bet.channel)
+                self.pots.append(new_pot)
+                self.bottomless_pot.empty()
+                bet.bet_size = 0
+            elif ( bet.bet_size > 0 ) and not bet.all_in:
+                self.bottomless_pot += bet.bet_size
+                bet.bet_size = 0
 
     # Get rid of all the max bets
     def next_bet_round(self) -> None:
@@ -132,21 +169,24 @@ class Pots:
                 self.pots.append(new_pot)
                 bet.bet_amount = 0
 
+    # Take in all the bets from every player and create proper pots
+    # def _add_bet_round(self, bet:Bet) -> None:
+        
+
     # BUILT IN FUNCTIONS
     def __repr__(self) -> str:
-        output = '='*8 + 'Pots' + '='*8 + '\n'
+        output = '='*8 + 'Pots' + '='*8
         for i,x in enumerate(self.pots):
-            if i==len(self.pots)-1:
-                output += f'Pot {i}:\n{x}'
-            else:
-                output += f'Pot {i}:\n{x}\n'
+                output += f'\nPot {i}:{x}'
+        output += f'\nBottomlessPot:{self.bottomless_pot.val}'
         return output
 
     def __add__(self, *args, **kwargs):
         raise ValueError('Error: cannot create new instance of game state, use `+=` to update or `print()` to get current state')
 
-    def __iadd__(self, bet:Bet):
-        if not isinstance(bet, Bet):
-            raise TypeError('Pots can only be added to a Bet object')
-        self._add_safe(bet, False)
+    def __iadd__(self, bet:RoundBets):
+        if not isinstance(bet, RoundBets):
+            raise TypeError('Pots can only be added to a RoundBets object')
+        # self._add_safe(bet, False)
+        self.add_bet_round_bets(bet)
         return self

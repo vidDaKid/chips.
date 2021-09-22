@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useParams, useLocation} from 'react-router-dom';
-import { useSocket } from '../hooks/useSocket';
+import { useEffect, useCallback, useContext } from 'react';
+import { useParams } from 'react-router-dom';
 import '../styles/App.css';
 import { ChipsContext } from '../context/chipsContext';
 import { GameContext } from '../context/gameContext';
+import { MAX_PLAYERS } from '../conf';
 
 function App() {
 	const { socketConnect, joinGame } = useContext(ChipsContext)
@@ -12,10 +12,18 @@ function App() {
 	const gameId = params.game_id
 	// const secret = localStorage.getItem('playerSecret')
 
+	const savePlayer = useCallback(() => {
+		console.log('unloading...')
+	}, [])
+
 	useEffect(() => {
 		// getSecret();
 		socketConnect();
-	}, [])
+		window.addEventListener('beforeunload', savePlayer);
+		return () => {
+			window.removeEventListener('beforeunload', savePlayer);
+		}
+	}, [socketConnect, savePlayer])
 
 	// async function getSecret() {
 		// let s = localStorage.getItem('playerSecret');
@@ -49,19 +57,20 @@ function App() {
 	}
 
 	function takeSeat (position) {
-		let name = prompt('whats ur name');
-		console.log(name)
-		joinGame(name, position);
+		let chosenName = prompt('whats ur name');
+		console.log(chosenName)
+		dispatch({type:'setName', name})
+		joinGame(gameId, chosenName, position);
 	}
 
-	if ( !client || client.readyState === WebSocket.CLOSED ) {
-		return (
-			<div className="App">
-				<h1 className="title">chips.</h1>
-				<p>Trying to connect to websocket...</p>
-			</div>
-		)
-	}
+	// if ( !client || client.readyState === WebSocket.CLOSED ) {
+		// return (
+			// <div className="App">
+				// <h1 className="title">chips.</h1>
+				// <p>Trying to connect to websocket...</p>
+			// </div>
+		// )
+	// }
 
   return (
     <div className="App">
@@ -76,7 +85,7 @@ function App() {
 						</tr>
 					</thead>
 					<tbody>
-						{range(maxPlayers).map(x => fillSeat(x))}
+						{range(MAX_PLAYERS).map(x => fillSeat(x))}
 					</tbody>
 				</table>
 					{/*

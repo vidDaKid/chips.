@@ -1,14 +1,11 @@
-import { createContext } from 'react';
-import { gameStateZero } from '../helpers/gameStateZero';
-import { updateGame } from '../helpers/updateGame';
+import { createContext, useReducer } from 'react';
+import updateGame from '../helpers/updateGame';
 
-export const GameContext = createContext();
+export const GameContext = createContext(null);
 
-export const GameProvider = () => {
-	const [state, dispatch] = useReducer(updateGame, gameStateZero)
 
-	return (
-		<GameContext.Provider value={{...state, dispatch}}>
-		</GameContext.Provider>
-	)
-}
+// export const GameProvider = () => {
+// 
+	// return (
+	// )
+// }

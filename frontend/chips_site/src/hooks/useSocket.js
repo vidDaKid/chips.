@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { WSLINK } from '../conf';
 
 export default function useSocket (onOpen, onMessage, onClose, onError) {

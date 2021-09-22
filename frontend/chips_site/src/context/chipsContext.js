@@ -1,16 +1,20 @@
-import { useCallback, useContext } from 'react';
-import { WSLINK } from '../conf';
+import { useCallback, useContext, createContext } from 'react';
+// import { WSLINK } from '../conf';
 // import { gameReducer } from '../helpers/gameReducer';
-import { gameStateZero } from '../helpers/gameStateZero';
+// import { gameStateZero } from '../helpers/gameStateZero';
 import { createCall } from '../helpers/calls';
-import { ChipsContext } from '../context/chipsContext';
 import { GameContext } from '../context/gameContext';
+import useSocket from '../hooks/useSocket';
+// import updateGame from '../helpers/updateGame';
 
-export default function ChipsProvider () {
+export const ChipsContext = createContext();
+
+export function ChipsProvider () {
 	const { dispatch } = useContext(GameContext)
 
 	const onMessage = useCallback(msg => {
-		dispatch(msg)
+		let action = JSON.parse(msg)
+		dispatch(action)
 	})
 
 	const onOpen = useCallback(() => {
@@ -22,15 +26,16 @@ export default function ChipsProvider () {
 	}, [])
 
 	const onError = useCallback(err => {
-		console.log(err)
+		let error = JSON.parse(err)
+		dispatch(error)
 	}, [])
 
 	const [connect, sendMessage] = useSocket(onOpen, onMessage, onClose, onError)
 	
 	// functions to send to server
 	const joinGame = useCallback((gameId, name, position) => {
-		createCall('JOIN', {gameId:gameId, name:name, position:position})
-	}, [])
+		sendMessage(createCall('JOIN', {gameId, name, position}))
+	}, [sendMessage])
 
 	const socketConnect = useCallback(() => {
 		connect()

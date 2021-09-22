@@ -1,18 +1,20 @@
-import React, { useEffect } from 'react';
+import React, { useReducer } from 'react';
 import ReactDOM from 'react-dom';
 import { BrowserRouter as Router, Switch, Route } from 'react-router-dom'
-import './index.css';
-import App from './App';
-import Home from './Home';
+import './styles/index.css';
+import App from './components/App';
+import Home from './components/Home';
 import reportWebVitals from './reportWebVitals';
-import { ChipsProvider } from '../helpers/chipsProvider';
-import { GameProvider } from '../context/gameContext';
-// import clientContext from '../context/SocketContext';
+import { ChipsProvider } from './context/chipsContext';
+import { GameContext } from './context/gameContext';
+import { gameStateZero } from './helpers/gameStateZero';
+import { gameReducer } from './helpers/gameReducer';
 
 function Index() {
+	const [state, dispatch] = useReducer(gameReducer, gameStateZero)
 
 	return (
-		<GameProvider>
+		<GameContext.Provider value={{...state, dispatch}}>
 			<ChipsProvider>
 				<Router>
 					<Switch>
@@ -21,7 +23,7 @@ function Index() {
 					</Switch>
 				</Router>
 			</ChipsProvider>
-		</GameProvider>
+		</GameContext.Provider>
 	)
 }
 

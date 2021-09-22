@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useHistory } from 'react-router-dom';
 
 import '../styles/Home.css';
@@ -6,8 +6,6 @@ import '../styles/Home.css';
 function Home() {
 	const [gameId, setGameId] = useState('')
 	const [join, setJoin] = useState(false)
-	// const [create, setCreate] = useState(false)
-	// const [name, setName] = useState('')
 	const history = useHistory()
 
 	function newGameId() {

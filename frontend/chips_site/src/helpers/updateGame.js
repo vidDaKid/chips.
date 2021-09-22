@@ -1,27 +1,26 @@
-import { useContext } from 'react';
-import { ChipsContext } from '../context/chipsContext';
+import React, { useContext } from 'react';
+import { GameContext } from '../context/gameContext';
 
-export default function updateGame(msg) {
-	const [{name, position, players}, setGameState] = useContext(ChipsContext)
+export default function UpdateGame(msg) {
 	const action = JSON.parse(msg)
+	const { players } = useContext(GameContext)
 
-	function addPlayer = useCallback((player) => {
-		setGameState(cState => {...cState, players: [...cState.players, player]})
-	}, [setGameState])
+	const addPlayer = player => {
+		players.concat(player)
+	}
 
 	switch (action.type) {
 		case 'NEW_PLAYER':
-			let new_player = {
+			let newPlayer = {
 				'player':action.player,
 				'position':action.position,
 				// 'c_count':action.c_count,
 			}
-			addPlayer(new_player)
+			addPlayer(newPlayer)
 			break
 
 		case 'PLAYERS':
-			action.players.forEach(x => addPlayer(x))
-			// console.log(action.players)
+			addPlayer(action.players)
 			break
 
 		case 'SECRET':

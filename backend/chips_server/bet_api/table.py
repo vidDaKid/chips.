@@ -221,7 +221,7 @@ class Table:
         return output
 
     # PLAYER FUNCTIONS
-    def add_player(self, channel:str, name:str='', c_count:int=None) -> str and int:
+    def add_player(self, channel:str, name:str='', c_count:int=None, position:int=None) -> str and int:
         if self.player_is_in_game(channel=channel):
             player = self._get_player_by_channel(channel=channel)
             return player.name, player.c_count
@@ -229,24 +229,32 @@ class Table:
             c_count = self.settings['default_count']
         if name == '':
             name = 'Player ' + str(len(self.players))
-        new_player = Player(channel=channel, name=name, c_count=c_count) # Make a player
-        new_player.position = len(self.players) # put them in the last position
+        elif not self.name_is_available(name):
+            raise ValueError('This name is already taken')
+        if not position:
+            position = len(self.players)
+        new_player = Player(channel=channel, name=name, c_count=c_count, position=position) # Make a player
+        # new_player.position = len(self.players) # put them in the last position
         self.players.append(new_player) # Add them to the table
-        return name, c_count, new_player.secret
+        return name, c_count, position,  new_player.secret
     
     def remove_player(self, channel:str) -> None:
         player = self._get_player_by_channel(channel)
         self.players.remove(player)
         self.removed.append(player)
 
-    def update_player_secret(self, channel:str, secret:str) -> None:
+    def update_player_secret(self, channel:str, secret:str) -> str and int:
         for player in list(self.removed):
             if player.secret == secret:
-                player.channel = channel
                 self.removed.remove(player)
                 self.players.append(player)
+                if self.position_is_available(player.position):
+                    player.position = position
+                else:
+                    raise ValueError('That position is not available')
+                player.channel = channel
                 self.order_players()
-                return player.name, player.c_count
+                return player.name, player.c_count, player.position
         else:
             raise KeyError('No player found with the secret key you provided')
 
@@ -265,6 +273,12 @@ class Table:
     def name_is_available(self, name:str) -> bool:
         for player in self.players:
             if player.name == name:
+                return False
+        return True
+
+    def position_is_available(self, position:int) -> bool:
+        for player in self.players:
+            if player.position == position:
                 return False
         return True
 

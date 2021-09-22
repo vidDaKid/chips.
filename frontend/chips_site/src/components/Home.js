@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useHistory } from 'react-router-dom';
 
-import './Home.css';
+import '../styles/Home.css';
 
 function Home() {
 	const [gameId, setGameId] = useState('')

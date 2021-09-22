@@ -61,7 +61,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         if len(game.table.players) > 0:
             await self.send(json.dumps({
                 'type':'PLAYERS',
-                'players':[{'player':x.name,'c_count':x.c_count} for x in game.table.players]
+                'players':[{'player':x.name,'c_count':x.c_count,'position':x.position} for x in game.table.players]
             }))
 
         # save the session
@@ -122,9 +122,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         ## Join a game
         if action['type']=='JOIN':
             name = ''
-            if self._has_params(action, ['name']):
+            if self._has_params(action, ['name', 'position']):
                 name = action['name']
-            await self.join_game(name=name)
+                position = action['position']
+            await self.join_game(name=name, position=position)
         ## Get ur player back w the secret
         elif action['type']=='SECRET_JOIN':
             if self._has_params(action, ['secret']):
@@ -196,9 +197,12 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     ''' FUNCTIONALITY '''
     ## GAME
-    async def join_game(self, name:str) -> None:
+    async def join_game(self, name:str, position:int=None) -> None:
         game = self.games[self.game_id]
-        name, c_count, secret = game.table.add_player(channel=self.channel_name, name=name)
+        try:
+            name, c_count, position, secret = game.table.add_player(channel=self.channel_name, name=name, position=position)
+        except ValueError as e:
+            await self._send_fail_mesage(e)
         # if is_in_game:
             # await self._send_fail_message('Player already in game')
             # return
@@ -211,6 +215,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'type':'announce_new_player',
                 'player':name,
                 'c_count':c_count,
+                'position':position,
             }
         )
     ## Get old player back
@@ -221,7 +226,16 @@ class GameConsumer(AsyncWebsocketConsumer):
         except KeyError as e:
             await self._send_fail_message(e)
             return
-        await self.send({'type':'SECRET_PLAYER','player':name,'c_count':c_count})
+        # await self.send(json.dumps({'type':'SECRET_PLAYER','player':name,'c_count':c_count}))
+        await self.channel_layer.group_send(
+            self.game_id,
+            {
+                'type':'announce_new_player',
+                'player':name,
+                'c_count':c_count,
+                'position':position
+            }
+        )
     ## Betting
     async def start_game(self) -> None:
         game = self.games[self.game_id]
@@ -711,7 +725,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.send(json.dumps(event['announcement']))
 
     async def announce_new_player(self, event:dict[str]):
-        await self.send(json.dumps({'type':'NEW_PLAYER','player':event['player'],'c_count':event['c_count']}))
+        await self.send(json.dumps({
+            'type':'NEW_PLAYER',
+            'player':event['player'],
+            'c_count':event['c_count'],
+            'position':event['position']
+        }))
 
     ''' USEFUL FUNCTIONS '''
     def _verify_player_in_game(self):

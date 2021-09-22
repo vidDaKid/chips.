@@ -5,11 +5,11 @@ from typing import Optional, List
 import uuid
 
 class Player:
-    def __init__(self, channel:str, name:str=None, c_count:Optional[int]=None):
+    def __init__(self, channel:str, name:str=None, c_count:Optional[int]=None, position:int=None):
         # @var channel // self.channel_name in django channels
         self.channel = channel
         # @var position // seat position at table
-        self.position:int = -1
+        self.position:int = position or -1
         # @var c_count // chip count (total chips)
         self.c_count:int = c_count or 0
         # @var name // player nickname

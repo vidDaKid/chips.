@@ -147,7 +147,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         ## Change sears
         elif action['type'] == 'MOVE':
             if not self._has_params(action, ['position']): return
-            position = action.position
+            position = action['position']
             game = self.games[self.game_id]
             player = game.table._get_player_by_channel(self.channel_name)
             player.position = position
@@ -223,11 +223,15 @@ class GameConsumer(AsyncWebsocketConsumer):
     ''' FUNCTIONALITY '''
     ## GAME
     async def join_game(self, name:str, position:int) -> None:
+        if name == 'null' or not name:
+            await self._send_fail_message('Name must only have characters, symbols, and numbers')
+            return
         game = self.games[self.game_id]
         try:
             name, c_count, position, secret = game.table.add_player(channel=self.channel_name, name=name, position=position)
         except ValueError as e:
             await self._send_fail_message(e)
+            return
         # if is_in_game:
             # await self._send_fail_message('Player already in game')
             # return
@@ -243,6 +247,8 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'position':position,
             }
         )
+        # Send the game settings to the client
+        await self.announce_settings()
     ## Get old player back
     async def join_with_player_secret(self, secret:str) -> None:
         game = self.games[self.game_id]
@@ -261,6 +267,8 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'position':position
             }
         )
+        # Send game settings to client
+        await self.announce_settings()
     ## Betting
     async def start_game(self) -> None:
         game = self.games[self.game_id]
@@ -777,6 +785,13 @@ class GameConsumer(AsyncWebsocketConsumer):
     async def announce_decide_winner(self, event:dict[str]):
         await self.send(json.dumps({
             'type': 'DECIDE_WINNER',
+        }))
+
+    async def announce_settings(self):
+        game = self.games[self.game_id]
+        await self.send(json.dumps({
+            'type':'SETTINGS',
+            'settings': game.table.settings
         }))
 
     ''' USEFUL FUNCTIONS '''

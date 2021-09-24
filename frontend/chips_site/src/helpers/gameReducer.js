@@ -31,9 +31,30 @@ export function gameReducer (state, action) {
 			// console.log('Player Secret: ' + secret)
 			return state
 
+		case 'SETTINGS':
+			return {...state, settings:action.settings}
+
 			// announces teh dealer, small blind and big blind each round
 		case 'POSITIONS':
-			return {...state, dealer: action.positions.dealer}
+			// add the bet for the blinds
+			let playerBlinds = new Set()
+			// console.log(action)
+			state.players.forEach(i => {
+				// console.log('player: ' + i.player + ' sb: ' + action.small_blind)
+				if (i.player == action.positions.small_blind) {
+					// console.log('small blind: ' + i.player)
+					playerBlinds.add({...i, c_count:i.c_count-Math.round(state.settings.big_blind/2)})
+				} else if (i.player == action.positions.big_blind) {
+					// console.log('big blind: ' + i.player)
+					playerBlinds.add({...i, c_count:i.c_count-state.settings.big_blind})
+				} else {
+					// console.log('other:' + i.player)
+					playerBlinds.add({...i})
+				}
+				return null
+			})
+			// console.log(playerBlinds)
+			return {...state, dealer: action.positions.dealer, players:playerBlinds}
 
 			// Says who's turn it is to play
 		case 'TO_PLAY':

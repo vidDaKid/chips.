@@ -5,4 +5,5 @@ export const gameStateZero = {
 	pot: 0,
 	players: new Set(),
 	toPlay: { player: '', owed: 0 },
+	settings: {},
 }

@@ -341,7 +341,13 @@ class Table:
 
     def update_settings(self, new_settings:dict[str and int]):
         # Do some checking / error handling here at some point
-        self.settings = new_settings
+        updated_settings = dict()
+        for setting, value in self.settings.items():
+            if setting in new_settings:
+                updated_settings[setting] = new_settings[setting]
+            else:
+                updated_settings[setting] = self.settings[setting]
+        self.settings = updated_settings
 
 
     # HELPER FUNCTIONS

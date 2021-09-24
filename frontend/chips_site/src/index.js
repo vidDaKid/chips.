@@ -31,8 +31,7 @@ function Index() {
 	}, [])
 
 	const onError = useCallback(err => {
-		let error = JSON.parse(err)
-		dispatch(error)
+		dispatch(err)
 	}, [])
 
 	const [connect, sendMessage, socket] = useSocket(onOpen, onMessage, onClose, onError)

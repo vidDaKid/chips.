@@ -5,7 +5,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from bet_api.game import Game
 
 ''' TEMPORARY DEBUG VARIABLE '''
-DEBUG = True
+DEBUG = False
 
 class GameConsumer(AsyncWebsocketConsumer):
     # Game State information
@@ -351,13 +351,21 @@ class GameConsumer(AsyncWebsocketConsumer):
         game = self.games[self.game_id]
         player = game.table.fold(self.channel_name)
         await self.channel_layer.group_send(self.game_id, {'type':'announce_fold', 'player':player})
-        await self.channel_layer.group_send(self.game_id, 
-            {
-                'type':'announce_current_turn',
-                'player':game.table.curr_player.name,
-                'owed': game.table.amount_owed()
-            }
-        )
+        if len(game.table.queue) == 0:
+            await self.channel_layer.group_send(
+                self.game_id,
+                {
+                    'type': 'announce_decide_winner',
+                }
+            )
+        else:
+            await self.channel_layer.group_send(self.game_id, 
+                {
+                    'type':'announce_current_turn',
+                    'player':game.table.curr_player.name,
+                    'owed': game.table.amount_owed()
+                }
+            )
 
     # async def play(self, play:str, game_id:str, bet_size:int=None):
         # if not self._game_exists(game_id):
@@ -675,7 +683,7 @@ class GameConsumer(AsyncWebsocketConsumer):
     
     ## Advance from current better to the next
     async def advance_bet(self, game_id:str):
-        _,_,_,max_bet,starting_player,current_player,players,player_order,_ = self.get_round_info(game_id)
+        _,_,_,max_bet, starting_player, current_player, players, player_order,_ = self.get_round_info(game_id)
         # If current player is in round & hasn't bet enough throw an error
         if (curr_player:=player_order[current_player]) in players and (
                 player[curr_player] < max_bet
@@ -812,7 +820,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         return
 
     async def _send_debug_message(self, msg:str) -> None:
-        await self.send(json.dumps({'DEBUG':str(msg)}))
+        await self.send(json.dumps({'type':'DEBUG', 'debug':str(msg)}))
 
     # @param index // 0=ordering, 1=voting
 

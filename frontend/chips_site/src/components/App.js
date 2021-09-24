@@ -4,11 +4,11 @@ import '../styles/App.css';
 import { SocketContext } from '../context/socketContext';
 import { GameContext } from '../context/gameContext';
 import { MAX_PLAYERS, WSLINK } from '../conf';
+import Bet from './bet';
 
 function App() {
 	const { connect, joinGame, moveSeat, placeBet, fold, startGame, socket } = useContext(SocketContext)
 	const { state, dispatch } = useContext(GameContext)
-	const [amount, setAmount] = useState('')
 	const params = useParams()
 	const gameId = params.game_id
 	// const [socket, setSocket] = useState(null)
@@ -136,25 +136,11 @@ function App() {
 			*/}
 			<button onClick={()=>console.log(state.players)}>PLAYERS</button>
 			<button onClick={()=>startGame()}>START</button>
-			<h4>Betting {'//'} {state.betRound.toUpperCase()}</h4>
-			{state.toPlay.player === state.name ? (
-				<div>
-					<p>Owed: {state.toPlay.owed}</p>
-					<div className="betButtons">
-						<input label='bet amount' 
-							value={amount} 
-							onChange={e => setAmount(e.target.value)} />
-						<button onClick={() => placeBet(amount)}>Play Bet</button>
-						<button onClick={fold}>Fold</button>
-					</div>
-				</div>
+			{ !state.decideWinner ? (
+				<Bet />
 			) : (
-				<div className="toPlay">
-					{state.toPlay.player!=='' &&
-					<h4>To Play: {state.toPlay.player} owes {state.toPlay.owed}</h4>
-					}
-				</div>
-		)}
+				<h4>Decide Winner</h4>
+			)}
 		</div>
 	)
 }

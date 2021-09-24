@@ -56,6 +56,9 @@ export function gameReducer (state, action) {
 			// console.log(playerBlinds)
 			return {...state, dealer: action.positions.dealer, players:playerBlinds}
 
+		case 'DECIDE_WINNER':
+			return {...state, decideWinner: true}
+
 			// Says who's turn it is to play
 		case 'TO_PLAY':
 			return {...state, toPlay: {player:action.player, owed:action.owed}}

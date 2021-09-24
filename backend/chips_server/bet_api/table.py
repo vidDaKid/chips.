@@ -359,7 +359,7 @@ class Table:
         # st_idx = self.players.index(st_player)
         st_idx = self._get_future_index(num_after_dealer)
         temp_q = reversed(self.players[st_idx:] + self.players[:st_idx])
-        self.queue = [x for x in temp_q if not (x.folded or x.all_in)]
+        self.queue = [x for x in temp_q if not (x.folded or x.all_in or (x is self.curr_player))]
         # Get the first player to play
         if update_curr:
             self.curr_player = self.queue.pop()

@@ -177,9 +177,8 @@ class Table:
             player.reset_round()
 
     # Add bets to the pot
-    def end_bet_round(self) -> None:
-        ''' ADD BETS TO POT '''
-        pass
+    # def end_bet_round(self) -> None:
+        # pass
 
     # For now it just returns a bool of whether or not we need to go to the next round
     def advance_bet(self) -> None:
@@ -188,6 +187,9 @@ class Table:
             # Check for whether or not its preflop
             pre_flop = True if self.bet_round == 0 else False
             self.create_queue(update_curr=False, pre_flop=pre_flop)
+            # if theres a single person in the queue, give em the winnings
+            if len(self.queue) is 0:
+                self.next_bet_round()
 
     # def start_betting_round(self) -> None:
         # # Same as start_round
@@ -212,6 +214,9 @@ class Table:
         self.reset_bet_round()
         # get a new queue for the next round
         self.create_queue()
+        # end the round if theres only 1 person betting
+        if len(self.queue) is 0:
+            return True
         return False
 
     def get_bets(self) -> None:
@@ -224,14 +229,16 @@ class Table:
     def add_player(self, channel:str, name:str='', c_count:int=None, position:int=None) -> str and int:
         if self.player_is_in_game(channel=channel):
             player = self._get_player_by_channel(channel=channel)
-            return player.name, player.c_count
+            # if position: 
+                # player.position = position
+            return player.name, player.c_count, player.position, player.secret
         if c_count is None:
             c_count = self.settings['default_count']
         if name == '':
             name = 'Player ' + str(len(self.players))
         elif not self.name_is_available(name):
             raise ValueError('This name is already taken')
-        if not position:
+        if position is None:
             position = len(self.players)
         new_player = Player(channel=channel, name=name, c_count=c_count, position=position) # Make a player
         # new_player.position = len(self.players) # put them in the last position

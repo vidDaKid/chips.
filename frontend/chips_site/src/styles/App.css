@@ -9,3 +9,11 @@ body {
 	display:flex;
 	flex-direction: column;
 }
+
+.tableElements  {
+	border-collapse: collapse;
+}
+
+.tableElements, th, td {
+	border: 1px solid white;
+}

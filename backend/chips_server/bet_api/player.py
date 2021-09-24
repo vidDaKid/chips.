@@ -9,7 +9,7 @@ class Player:
         # @var channel // self.channel_name in django channels
         self.channel = channel
         # @var position // seat position at table
-        self.position:int = position or -1
+        self.position:int = position if position is not None else -1
         # @var c_count // chip count (total chips)
         self.c_count:int = c_count or 0
         # @var name // player nickname

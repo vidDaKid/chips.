@@ -177,7 +177,7 @@ class Pots:
     def __repr__(self) -> str:
         output = '='*8 + 'Pots' + '='*8
         for i,x in enumerate(self.pots):
-                output += f'\nPot {i}:{x}'
+                output += f'\nPot {i}:{str(x)}'
         output += f'\nBottomlessPot:{self.bottomless_pot.val}'
         return output
 

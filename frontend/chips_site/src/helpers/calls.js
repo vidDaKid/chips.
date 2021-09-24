@@ -1,14 +1,34 @@
 export function createCall (type, action) {
+	let output = {}
 	switch(type) {
 		case "JOIN":
-			if (!action.hasOwnProperty('gameId') || !action.hasOwnProperty('name') || !action.hasOwnProperty('position')) return;
-			return {type:'JOIN', name:action.name, position:action.position, gameId:action.gameId}
+			// if (!action.hasOwnProperty('gameId') || !action.hasOwnProperty('name') || !action.hasOwnProperty('position')) return;
+			output = {type:'JOIN', name:action.name, position:action.position}
+			break
 		
 		case "SECRET_JOIN":
 			if (!action.hasOwnProperty('secret')) return;
-			return {type:"SECRET_JOIN", secret:action.secret}
+			output = {type:"SECRET_JOIN", secret:action.secret}
+			break
+
+		case "MOVE":
+			output = {type:'MOVE', position:action.position}
+			break
+
+		case "START":
+			output = {type:"START"}
+			break
+
+		case "BET":
+			output = {type:"BET", bet_size:action.betSize}
+			break
+
+		case "FOLD":
+			output = {type:"FOLD"}
+			break
 
 		default:
 			return
 	}
+	return JSON.stringify(output)
 }

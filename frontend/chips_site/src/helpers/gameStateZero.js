@@ -1,4 +1,8 @@
 export const gameStateZero = {
 	name: '',
-	players: [],
+	dealer: '',
+	betRound: 'pre-flop',
+	pot: 0,
+	players: new Set(),
+	toPlay: { player: '', owed: 0 },
 }

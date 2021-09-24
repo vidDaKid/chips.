@@ -1,11 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import { useHistory } from 'react-router-dom';
-
+import { GameContext } from '../context/gameContext';
+import { SocketContext } from '../context/socketContext';
 import '../styles/Home.css';
 
 function Home() {
 	const [gameId, setGameId] = useState('')
 	const [join, setJoin] = useState(false)
+	const {state, dispatch} = useContext(GameContext);
+	// const { socketConnect, joinGame } = useContext(SocketContext);
 	const history = useHistory()
 
 	function newGameId() {
@@ -30,6 +33,15 @@ function Home() {
 		let path = `game/${gameId}/`;
 		history.push(path);
 	}
+
+	// temp for testing
+	// return (
+		// <div>
+			// <h1>chips.</h1>
+			// <button onClick={() => dispatch({type:'NEW_PLAYER', player:'vee',})}>test reducer</button>
+			// <pre>{state.players}</pre>
+		// </div>
+	// )
 
 	return (
 		<div className="main">

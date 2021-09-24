@@ -7,13 +7,13 @@ import { GameContext } from '../context/gameContext';
 import useSocket from '../hooks/useSocket';
 // import updateGame from '../helpers/updateGame';
 
-export const ChipsContext = createContext();
+export const SocketContext = createContext();
 
-export function ChipsProvider () {
-	const { dispatch } = useContext(GameContext)
+export function SocketProvider () {
+	const { state, dispatch } = useContext(GameContext)
 
 	const onMessage = useCallback(msg => {
-		let action = JSON.parse(msg)
+		let action = JSON.parse(msg.data)
 		dispatch(action)
 	})
 
@@ -42,7 +42,7 @@ export function ChipsProvider () {
 	}, [connect])
 
 	return (
-		<ChipsContext.Provider value={{socketConnect, joinGame}}>
-		</ChipsContext.Provider>
+		<SocketContext.Provider value={{socketConnect, joinGame}}>
+		</SocketContext.Provider>
 	)
 }

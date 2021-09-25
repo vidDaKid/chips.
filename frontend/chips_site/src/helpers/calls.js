@@ -28,7 +28,7 @@ export function createCall (type, action) {
 			break
 
 		default:
-			return
+			output = {type}
 	}
 	return JSON.stringify(output)
 }

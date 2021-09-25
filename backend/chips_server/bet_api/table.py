@@ -19,6 +19,9 @@ class Table:
         # @var pot // Holds all the pot state
         self.pot = Pots()
 
+        # store the winners for the round temporarily
+        self.winners = list()
+
         # @var bet_round // Tracks the current round we're in
         self.bet_round:int = 0 # 0->4 == pre_flop -> river
 
@@ -224,6 +227,12 @@ class Table:
         for player in self.players:
             output[player.name] = player.curr_bet
         return output
+
+    def claim_win(self, channel:str) -> None:
+        player = self._get_player_by_channel(channel)
+        if player.folded:
+            return
+        self.winners.append({'player':player.player, 'amount':0})
 
     # PLAYER FUNCTIONS
     def add_player(self, channel:str, name:str='', c_count:int=None, position:int=None) -> str and int:

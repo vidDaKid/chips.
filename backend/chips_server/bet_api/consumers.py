@@ -3,6 +3,7 @@ from typing import List
 from collections import defaultdict
 from channels.generic.websocket import AsyncWebsocketConsumer
 from bet_api.game import Game
+from bet_api.tasks import bet_timer
 
 ''' TEMPORARY DEBUG VARIABLE '''
 DEBUG = False
@@ -83,6 +84,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'player':name,
             }
         )
+        await self.channel_layer.group_discard(self.game_id, self.channel_name)
         return
 
     # Receive action from client and send it to the game
@@ -209,10 +211,16 @@ class GameConsumer(AsyncWebsocketConsumer):
                 await self.send(repr(self.games[self.game_id]))
             else:
                 await self.send('Must turn on DEBUG to receive these messages')
+        elif action['type']=='CLAIM_WIN':
+            game = self.game[self.game_id]
+            game.table.claim_win(self.channel_name)
         elif action['type']=='POTS':
             if DEBUG:
                 game = self.games[self.game_id]
                 await self._send_debug_message(str(game.table.pot))
+        elif action['type']=='TEST_COUNTDOWN':
+            # await bet_timer.apply_async((game_id=self.game_id,), countdown=10)
+            bet_timer.apply_async((self.game_id,), countdown=5)
         # elif action['type']=='BETS':
             # if DEBUG:
                 # game = self.games[
@@ -328,6 +336,11 @@ class GameConsumer(AsyncWebsocketConsumer):
         if new_round:
             # get the elibile pot winners from the table and send it to everyone
             await self.channel_layer.group_send(self.game_id, {'type':'announce_decide_winner'})
+            # time.sleep(5)
+            if game.table.winners == []:
+                await self.channel_layer.group_send(self.game_id, {'type':'announce_vote_winner'})
+            else:
+                await self.channel_layer.group_send(self.game_id, {'type':'announce_winners','winners':game.table.winners})
             # await self.channel_layer.group_send(self.game_id,{ 'type':'announce_new_round' })
         elif new_bet_round:
             await self.channel_layer.group_send(self.game_id,{
@@ -790,10 +803,17 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'type':'POT',
                 'pot':event['pot']
             }))
+
     async def announce_decide_winner(self, event:dict[str]):
         await self.send(json.dumps({
             'type': 'DECIDE_WINNER',
         }))
+
+    async def announce_vote_winners(self, event:dict[str]):
+        await self.send(json.dumps({'type':'VOTE_WINNER'}))
+
+    async def announce_winners(self, event:dict[str]):
+        await self.send(json.dumps({'type':'WINNERS', 'winners':event['winners']}))
 
     async def announce_settings(self):
         game = self.games[self.game_id]
@@ -836,3 +856,6 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     def _game_exists(self, game_id:str) -> bool:
         return self.games.__contains__(game_id)
+
+    async def announce_time_up(self, event):
+        await self.send(json.dumps({'type':'TIME_UP'}))

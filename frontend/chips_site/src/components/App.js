@@ -7,7 +7,7 @@ import { MAX_PLAYERS, WSLINK } from '../conf';
 import Bet from './bet';
 
 function App() {
-	const { connect, joinGame, moveSeat, placeBet, fold, startGame, socket } = useContext(SocketContext)
+	const { timer, connect, joinGame, moveSeat, placeBet, fold, startGame, socket } = useContext(SocketContext)
 	const { state, dispatch } = useContext(GameContext)
 	const params = useParams()
 	const gameId = params.game_id
@@ -133,9 +133,10 @@ function App() {
 					<button onClick={joinGame}>Take Seat</button>
 				</div>
 			)}
-			*/}
 			<button onClick={()=>console.log(state.players)}>PLAYERS</button>
-			<button onClick={()=>startGame()}>START</button>
+			*/}
+			<button onClick={startGame}>START</button>
+			<button onClick={timer}>TIME</button>
 			{ !state.decideWinner ? (
 				<Bet />
 			) : (

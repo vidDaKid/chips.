@@ -94,7 +94,7 @@ class Table:
         # Check for raise
         total_bet = bet_size + player.curr_bet
         # Make sure toatl bet is equal or bigger the big blind
-        if (total_bet != 0) and (total_bet < (self.settings['big_blind'])):
+        if total_bet < (self.settings['big_blind']):
             raise ValueError(f"Error! Bet size must be at least big blind: {self.settings['big_blind']}")
         if total_bet > self.curr_bet:
             # u have to raise by the smallest bet, otherwise its not a valid raise
@@ -111,30 +111,33 @@ class Table:
         if not self.first_bet:
             self.first_bet = True
             self.last_raise = player
+            # Update the min_raise if no one has set it yet
+            if ( not self.min_raise_set ) and ( bet_size > 0 ):
+                self.min_raise = bet_size
+                self.min_raise_set = True
 
+        # If theres no one else to fill the queue, go to decision
+        if len(self.queue) == 0:
+            pass
+            # return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, False, True
+        else:
+            # Check for new betting round
+            if self.queue[-1] is self.last_raise:
+                ''' NEW BET ROUND '''
+                next_round:bool = self.next_bet_round()
+                # if new_round:
+                    # self.new_round()
+                return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, True, next_round
 
         # Add the bet to the player
         player.add_bet(bet_size)
-
-        # If theres no one else to fill the queue, go to decision
-            # return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, False, True
-            # Check for new betting round
-        if self.check_if_new_round():
-            # Add the bet to the player
-            player.add_bet(bet_size)
-            return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, False, True
-        if self.check_if_new_bet_round():
-            next_round:bool = self.next_bet_round()
-            if next_round:
-                return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, False, True
-            return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, True, False
-
         # move to the next better and send it to the consumer
-        self.advance_bet()
+        decision = self.advance_bet()
+
 
         # Announcements to send to client
             # [ bet_announcement, to_play, new_bet_round, new_round ]
-        return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, False, False
+        return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, False, decision
 
         # Create a new bet to add to the pot
         # bet = Bet(bet_size=bet_size, player=player)
@@ -159,20 +162,12 @@ class Table:
         self.min_raise_set = True
         self.curr_bet = big_blind
 
-    # returns [folded player, new_bet_round, new_round]
+    # returns the name of the player than folded and whether or not the bet should advance
     def fold(self, channel:str) -> str and bool:
         player = self._get_player_by_channel(channel)
         player.fold()
-        if self.check_if_new_round(fold=True):
-            return player.name, False, True
-        if self.check_if_new_bet_round():
-            next_round:bool = self.next_bet_round()
-            # if were on the last bet round n need to move on
-            if next_round:
-                return player.name, False, True
-            return player.name, True, False
-        self.advance_bet()
-        return player.name, False, False
+        decision = self.advance_bet()
+        return player.name, decision
 
     # Starts the round and returns a dictionary containing the dealer, small blind, & big blind
     def start_round(self) -> dict[str and Player]:
@@ -209,35 +204,18 @@ class Table:
     # For now it just returns a bool of whether or not we need to go to the next round
     def advance_bet(self) -> bool:
         # initial check to see if q is empty
-        # if self.queue == []:
-            # return True
+        if self.queue == []:
+            return True
         self.curr_player = self.queue.pop()
         if self.queue == []:
             # Check for whether or not its preflop
             pre_flop = True if self.bet_round == 0 else False
             self.create_queue(update_curr=False, pre_flop=pre_flop)
             # if theres a single person in the queue, give em the winnings
-            # if len(self.queue) == 0:
-                # return False
+            if len(self.queue) == 0:
+                return False
                 # self.next_bet_round()
-        # return False
-    
-    def check_if_new_bet_round(self) -> bool:
-        if self.queue[-1] is self.last_raise:
-            ''' NEW BET ROUND '''
-            return True
         return False
-
-    def check_if_new_round(self, fold=False) -> bool:
-        if len(self.queue) == 0:
-            return True
-        if fold:
-            if len([x for x in self.players if not (x.folded or x.all_in)]) == 1:
-                return True
-        return False
-            # self.create_queue(update_curr=False)
-            # if len(self.queue) == 0:
-                # return True
 
     # def start_betting_round(self) -> None:
         # # Same as start_round
@@ -256,15 +234,15 @@ class Table:
         if self.bet_round == 3:
             # NEW ROUND #
             self.reset_round()
-            # self.create_queue()
+            self.create_queue()
             return True
         # Advance bet round state
         self.reset_bet_round()
         # get a new queue for the next round
         self.create_queue()
         # end the round if theres only 1 person betting
-        # if len(self.queue) == 0:
-            # return True
+        if len(self.queue) == 0:
+            return True
         return False
 
     # def get_bets(self) -> None:
@@ -283,7 +261,7 @@ class Table:
     def get_eligible_winners(self) -> List[tuple[str]]:
         possible_winners = self.pot.get_eligible_winners()
         sorted_poss_winners = sorted(possible_winners, key=lambda x: len(possible_winners.get(x)), reverse=True)
-        main_pot_options = [x.name for x in self.players if not x.folded]
+        main_pot_options = [x.name for x in self.players if not (x.folded or x.all_in)]
         return main_pot_options + [possible_winners.get(x) for x in sorted_poss_winners]
 
     # PLAYER FUNCTIONS

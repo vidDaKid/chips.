@@ -47,6 +47,7 @@ function Index() {
 
 	const startGame = useCallback(() => {
 		sendMessage(createCall('START'))
+		// dispatch({type:'startGame'})
 	}, [sendMessage])
 	
 	const placeBet = useCallback(betSize => {
@@ -57,13 +58,9 @@ function Index() {
 		sendMessage(createCall('FOLD'))
 	}, [sendMessage])
 
-	const timer = useCallback(() => {
-		sendMessage(createCall('TEST_COUNTDOWN'))
-	}, [sendMessage])
-
 	return (
 		<GameContext.Provider value={{state, dispatch}}>
-			<SocketContext.Provider value={{timer, connect, joinGame, moveSeat, placeBet, fold, startGame, socket}}>
+			<SocketContext.Provider value={{connect, joinGame, moveSeat, placeBet, fold, startGame, socket}}>
 				<Router>
 					<Switch>
 						<Route exact path='/' component={Home} />

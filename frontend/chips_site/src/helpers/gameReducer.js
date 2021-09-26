@@ -57,7 +57,8 @@ export function gameReducer (state, action) {
 			return {...state, dealer: action.positions.dealer, players:playerBlinds}
 
 		case 'DECIDE_WINNER':
-			return {...state, decideWinner: true}
+			// console.log(action.options)
+			return {...state, decideWinner: true, inRound: false, options:action.options }
 
 			// Says who's turn it is to play
 		case 'TO_PLAY':
@@ -68,7 +69,7 @@ export function gameReducer (state, action) {
 			return {...state, betRound: action.bet_round}
 
 		case "NEW_ROUND":
-			return {...state, betRound: "pre-flop"}
+			return {...state, betRound: "pre-flop", inRound:true, decideWinner:false}
 
 			// betting info
 		case "PREV_BET":
@@ -78,6 +79,9 @@ export function gameReducer (state, action) {
 			// add bet to the game state pot
 			return {...state, players:updatedPlayers, pot:state.pot+action.bet_size}
 
+		case "FOLD":
+			return {...state}
+
 		case 'FAIL':
 			alert(action.message)
 			return state
@@ -85,9 +89,8 @@ export function gameReducer (state, action) {
 		case 'setName':
 			return {...state, name:action.name}
 
-		case 'testing':
-			console.log(state)
-			return state
+		case 'startGame':
+			return {...state, inRound: true}
 
 		default:
 			console.log(`Unexpected type: ${action.type}`)

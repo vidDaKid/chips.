@@ -111,6 +111,8 @@ class Pots:
         bets.sort()
         for bet in bets.bets:
             # 1st put whatever u can in each pot
+            # then create new pots if ur all in
+            # or dump the rest in the bottomless if ur not
             for pot in self.pots:
                 amount = min(bet.bet_size, pot.max_bet)
                 pot += (amount, bet.channel)
@@ -129,49 +131,53 @@ class Pots:
         for pot in self.pots:
             if pot.max_bet != float('inf'):
                 pot.max_bet = 0
-                # pot.
+
+    def get_eligible_winners(self) -> dict[int and List[str]]:
+        output = dict()
+        for idx, pot in enumerate(self.pots):
+            output[idx] = list(pot.eligible)
+        return output
 
     # HELPER FUNCTIONS
-    def _add_safe(self, bet:Bet) -> None:
-        if not isinstance(bet, Bet):
-            raise TypeError('Pots can only be added to a`Bet` object')
-        for pot in self.pots:
-            # If the bet is smaller than the max, just add the bet and move on
-            if pot.max_bet >= bet.bet_size:
-                # empty the bet into the pot n move on if not all in
-                if not bet.all_in:
-                    pot += bet
-                    bet.bet_size = 0
-                    break
-                # Otherwise, empty the bet & drop the max bet
-                else:
-                    pot.add_all_in(bet)
-                    bet.bet_size = 0
-                    break
-            # Otherwise, add what you can to the pot, then move the next one
-            else:
-                new_bet_size = pot.bet_size_allowed(bet.player)
-                pot += new_bet_size
-                bet.bet_size -= new_bet_size
-            # If we finished adding the bet to the pots, break the loop -- this would never get called
-            # if bet.bet_size == 0:
-                # break
-        # If we r out of pots but still need to bet, make a new side Pot
-            # Only time this would happen is if u r the first to bet more than the current all_in
-        else:
-            # If not all in, just make a new pot with the bet amount
-            if not bet.all_in:
-                self.pots.append(Pot.new_pot_from_bet(bet))
-                bet.bet_amount = 0
-            # otherwsie, make a new pot & add an all in bet
-            else:
-                new_pot = Pot.new_pot_from_all_in_bet(bet)
-                self.pots.append(new_pot)
-                bet.bet_amount = 0
+    # def _add_safe(self, bet:Bet) -> None:
+        # if not isinstance(bet, Bet):
+            # raise TypeError('Pots can only be added to a`Bet` object')
+        # for pot in self.pots:
+            # # If the bet is smaller than the max, just add the bet and move on
+            # if pot.max_bet >= bet.bet_size:
+                # # empty the bet into the pot n move on if not all in
+                # if not bet.all_in:
+                    # pot += bet
+                    # bet.bet_size = 0
+                    # break
+                # # Otherwise, empty the bet & drop the max bet
+                # else:
+                    # pot.add_all_in(bet)
+                    # bet.bet_size = 0
+                    # break
+            # # Otherwise, add what you can to the pot, then move the next one
+            # else:
+                # new_bet_size = pot.bet_size_allowed(bet.player)
+                # pot += new_bet_size
+                # bet.bet_size -= new_bet_size
+            # # If we finished adding the bet to the pots, break the loop -- this would never get called
+            # # if bet.bet_size == 0:
+                # # break
+        # # If we r out of pots but still need to bet, make a new side Pot
+            # # Only time this would happen is if u r the first to bet more than the current all_in
+        # else:
+            # # If not all in, just make a new pot with the bet amount
+            # if not bet.all_in:
+                # self.pots.append(Pot.new_pot_from_bet(bet))
+                # bet.bet_amount = 0
+            # # otherwsie, make a new pot & add an all in bet
+            # else:
+                # new_pot = Pot.new_pot_from_all_in_bet(bet)
+                # self.pots.append(new_pot)
+                # bet.bet_amount = 0
 
     # Take in all the bets from every player and create proper pots
     # def _add_bet_round(self, bet:Bet) -> None:
-        
 
     # BUILT IN FUNCTIONS
     def __repr__(self) -> str:

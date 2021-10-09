@@ -1,0 +1,26 @@
+.Vote, .overlay {
+	top: 0;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	width: 100vw;
+	height: 100vh;
+	position: fixed;
+}
+
+.overlay {
+	background: rgba(49,49,49,0.8);
+}
+
+.voteModal {
+	position: absolute;
+	top: 15%;
+	left: 25%;
+	background: white;
+	width: 50vw;
+	height: 50vh;
+	color: black;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}

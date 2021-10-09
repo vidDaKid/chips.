@@ -56,9 +56,29 @@ export function gameReducer (state, action) {
 			// console.log(playerBlinds)
 			return {...state, dealer: action.positions.dealer, players:playerBlinds}
 
-		case 'DECIDE_WINNER':
-			// console.log(action.options)
-			return {...state, decideWinner: true, inRound: false, options:action.options }
+		// case 'DECIDE_WINNERS':
+			// return {...state, decideWinner: true, inRound: false, options:action.options, claimed: false}
+
+		// case 'VOTE_WINNERS':
+			// return {...state, voteWinner: true, decideWinner:false, options: action.eligible}
+
+		// case 'START_CLAIMS':
+			// return {...state, decideWinner: true}
+
+		case 'POTS':
+			// let jsonPots = new Array()
+			// action.pots.forEach(x => json.Pots.push(JSON.parse(x)))
+			return {...state, decideWinner:true, inRound:false, pots:action.pots}
+
+		// case 'WINNER':
+			// // pay out winner
+			// let paidPlayers = new Set()
+			// state.players.forEach(x => {
+				// paidPlayers.add(
+					// x.player===action.player ? {...x, c_count:x.c_count+action.amount} : x
+				// )
+			// })
+			// return {...state, players:paidPlayers}
 
 			// Says who's turn it is to play
 		case 'TO_PLAY':
@@ -71,13 +91,50 @@ export function gameReducer (state, action) {
 		case "NEW_ROUND":
 			return {...state, betRound: "pre-flop", inRound:true, decideWinner:false}
 
+		case "PAY_OUT":
+			// let unpaidPlayers = new Set()
+			// state.players.map(x => unpaidPlayers.add({...x, claimed: true}))
+			let paidOutPlayers = new Set()
+			state.players.forEach(x => {
+				let paidOutPlayer = action.players.find(y => y.player === x.player)
+				paidOutPlayers.add({...x, c_count:paidOutPlayer.c_count})
+			})
+			return {...state, inRound: false, decideWinner: false, voteWinner: false, claimed:false, options:{}, players:paidOutPlayers}
+
 			// betting info
 		case "PREV_BET":
 			// take away chips from player who bet
 			let updatedPlayers = new Set()
-			state.players.forEach(x => updatedPlayers.add(x.player==action.player ? {player:x.player, c_count:x.c_count-action.bet_size, position:x.position} : x))
+			state.players.forEach(x => {
+				updatedPlayers.add(
+					x.player==action.player ? (
+						{...x, c_count:x.c_count-action.bet_size} 
+					) : x
+				)
+			})
 			// add bet to the game state pot
 			return {...state, players:updatedPlayers, pot:state.pot+action.bet_size}
+
+		case "CLAIMED_WIN":
+			let updatedPotOptions
+			if (state.options.hasOwnProperty(action.pot_id)) {
+				updatedPotOptions = new Array(state.options[action.pot_id])
+			} else {
+				updatedPotOptions = new Array()
+			}
+			updatedPotOptions.push(action.player)
+			let newFullOptions = {...state.options}
+			newFullOptions[action.pot_id] = updatedPotOptions
+			return {...state, options:newFullOptions}
+
+		case "END_VOTE":
+			return {...state, vote:false, voteType:'', voteInfo: {}}
+
+		case "FAILED_VOTE":
+			return {...state, vote:false, voteType:'', voteInfo: {}}
+
+		case "VOTE_PAY":
+			return {...state, vote:true, voteType:'PAY', voteInfo:{options:action.options}}
 
 		case "FOLD":
 			return {...state}
@@ -92,8 +149,12 @@ export function gameReducer (state, action) {
 		case 'startGame':
 			return {...state, inRound: true}
 
+		case 'claimed':
+			return {...state, claimed: true}
+
 		default:
 			console.log(`Unexpected type: ${action.type}`)
+			// console.log(action)
 			return state
 	}
 }

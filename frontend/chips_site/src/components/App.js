@@ -4,11 +4,15 @@ import '../styles/App.css';
 import { SocketContext } from '../context/socketContext';
 import { GameContext } from '../context/gameContext';
 import { MAX_PLAYERS, WSLINK } from '../conf';
-import Bet from './bet';
+import Bet from './Bet';
+import Pots from './Pots';
+import Winners from './Winners';
+import Vote from './Vote';
 
 function App() {
-	const { connect, joinGame, moveSeat, placeBet, fold, startGame, socket } = useContext(SocketContext)
+	const { connect, claimWin, joinGame, moveSeat, placeBet, fold, startGame, socket } = useContext(SocketContext)
 	const { state, dispatch } = useContext(GameContext)
+	// const [claimed, setClaimed] = useState(false)
 	const params = useParams()
 	const gameId = params.game_id
 	// const [socket, setSocket] = useState(null)
@@ -27,16 +31,16 @@ function App() {
 	useEffect(() => {
 		// getSecret();
 		connect(gameId);
-		// console.log(socket)
 		window.addEventListener('beforeunload', savePlayer);
 		return () => {
 			window.removeEventListener('beforeunload', savePlayer);
 		}
 	}, [connect])
 
+	// reset claimed state each time we update the options
 	// useEffect(() => {
-		// console.log(socket)
-	// }, [socket])
+		// setClaimed(false)
+	// }, [state.options])
 
 	// async function getSecret() {
 		// let s = localStorage.getItem('playerSecret');
@@ -81,24 +85,17 @@ function App() {
 			return
 		}
 		let chosenName = prompt('whats ur name');
-		console.log(chosenName)
+		// console.log(chosenName)
 		dispatch({type:'setName', name:chosenName})
-		// socket.send({type:'JOIN',name:chosenName,position:position})
 		joinGame(chosenName, position);
 	}
 
-	// if ( !client || client.readyState === WebSocket.CLOSED ) {
-		// return (
-			// <div className="App">
-				// <h1 className="title">chips.</h1>
-				// <p>Trying to connect to websocket...</p>
-			// </div>
-		// )
-	// }
-
 	if (!socket || socket.readyState == WebSocket.CLOSED) {
 		return (
-			<h3>Connecting to websocket...</h3>
+			<div className="App">
+				<h1 className="title">chips.</h1>
+				<p>Trying to connect to websocket...</p>
+			</div>
 		)
 	}
   return (
@@ -120,35 +117,37 @@ function App() {
 						{range(MAX_PLAYERS).map(x => fillSeat(x))}
 					</tbody>
 				</table>
-					{/*
-					{players!==[] && players.map((player, idx) => <div key={idx}><tr>{player.player}</tr><tr>{player.c_count}</tr></div>)}
-					*/}
 			</div>
-			{/*
-			{!inGame && (
-				<div className="joinGame">
-					<label className="label">Pick a name to take a seat: </label>
-					<br />
-					<input value={name} onChange={e=>setName(e.target.value.toUpperCase())} />
-					<button onClick={joinGame}>Take Seat</button>
-				</div>
-			)}
-			<button onClick={()=>console.log(state.players)}>PLAYERS</button>
-			*/}
 			{ !state.inRound && <button onClick={startGame}>START</button> }
-			{ !state.decideWinner ? (
-				<Bet />
-			) : (
+			{ state.inRound && <Bet /> }
+			{ state.decideWinner && <Pots/> }
+			{ state.vote && <Vote /> }
+			{/* state.decideWinner &&
+					<div>
+						<h4>Decide Winner</h4>
+						<p>Pots</p>
+						<pre>{state.pots}</pre>
+						<h5>Options: {state.options.map((x,i) => i==state.options.length-1 ? x : x,)}</h5>
+						{ state.options.find(x => x==state.name) ? (
+							<div>
+								{state.claimed ? (
+									<p>Waiting for your winnings</p>
+								) : (
+									<button onClick={claimWin}>Claim Win</button>
+								)}
+							</div>
+						) : ( 
+							<p>Loser</p>
+						)}
+					</div>
+			*/}
+			{/* state.voteWinner && (
 				<div>
-					<h4>Decide Winner</h4>
-					<p>Options: {state.options.map((player,idx) => idx!==state.options.length-1 ? player + ', ' : player)}</p>
-					{/*
-						state.options.map((player, idx) => (
-							<p className="option" key={idx}>{player}</p>
-						))
-					*/}
+					<h4>Vote for Winner</h4>
+					<p>Options:</p>
+					{ state.options.map(x => <pre>{x}</pre>) }
 				</div>
-			)}
+			)*/}
 		</div>
 	)
 }

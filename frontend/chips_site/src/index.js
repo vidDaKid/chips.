@@ -58,9 +58,26 @@ function Index() {
 		sendMessage(createCall('FOLD'))
 	}, [sendMessage])
 
+	const claimWin = useCallback((pot_id) => {
+		sendMessage(createCall('CLAIM_WIN', {pot_id}))
+		// dispatch('claimed')
+	}, [sendMessage])
+
+	const payWinners = useCallback(() => {
+		sendMessage(createCall('PAY_WINNERS'))
+	}, [sendMessage])
+
+	const castBoolVote = useCallback((vote) => {
+		sendMessage(createCall('VOTE', {vote}))
+	}, [sendMessage])
+
+	// const startClaims = useCallback((potId) => {
+		// sendMessage(createCall('START_CLAIMS', {potId}))
+	// }, [sendMessage])
+
 	return (
 		<GameContext.Provider value={{state, dispatch}}>
-			<SocketContext.Provider value={{connect, joinGame, moveSeat, placeBet, fold, startGame, socket}}>
+			<SocketContext.Provider value={{connect, claimWin, castBoolVote, payWinners, joinGame, moveSeat, placeBet, fold, startGame, socket}}>
 				<Router>
 					<Switch>
 						<Route exact path='/' component={Home} />

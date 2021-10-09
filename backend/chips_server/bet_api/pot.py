@@ -4,6 +4,7 @@ This contains all the logic for handling bets in the pot. Obviously.
 from collections import defaultdict
 from bet_api.bet import Bet, RoundBets
 from typing import List, Optional
+import json
 
 class Pot:
     def __init__(self, value:int=0, max_bet:int=float('inf')):
@@ -16,6 +17,9 @@ class Pot:
 
         # @var eligible // players that contributed to the pot are eligible to win it
         self.eligible:List[str] = list() # list of channels
+
+        # @var paid_out // says whether or not the winning have gone to the players
+        self.paid_out = False
 
     @classmethod
     def new_all_in_pot(cls, bet_size:int, inherited_val:int, channel:str):
@@ -82,6 +86,7 @@ class Pot:
 class BottomlessPot:
     def __init__(self, val:int=0):
         self.val = val
+        self.paid_out = False # see Pot for definition
 
     def __add__(self, other:int) -> int:
         return self.val + other
@@ -137,6 +142,22 @@ class Pots:
         for idx, pot in enumerate(self.pots):
             output[idx] = list(pot.eligible)
         return output
+
+    def get_json_pots(self, eligible_main:List[str], channel_conversion:dict[str]) -> dict:
+        # json_pots = [{'id':idx, 'size':pot.val, 'eligible':[channel_conversion[x] for x in pot.eligible]} for idx, pot in enumerate(reversed(self.pots))]
+        json_pots = list()
+        for idx, pot in enumerate(reversed(self.pots)):
+            eligible_names = list()
+            for channel in pot.eligible:
+                if channel not in channel_conversion:
+                    continue
+                eligible_names.append(channel_conversion[channel])
+            # eligible_names = [channel_conversion[x] for x in pot.eligible]
+            json_pots.append({'id':idx, 'size': pot.val, 'eligible': eligible_names})
+        if self.bottomless_pot.val > 0:
+            json_pots.append({'id':-1, 'size':self.bottomless_pot.val, 'eligible':eligible_main})
+        return [json.dumps(x) for x in json_pots]
+
 
     # HELPER FUNCTIONS
     # def _add_safe(self, bet:Bet) -> None:

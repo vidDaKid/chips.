@@ -34,13 +34,10 @@ class Player:
     def reset_round(self) -> None:
         self.curr_bet = 0
         # self.curr_rnd_bet = 0
-        self.all_in, self.folded = False, False
+        self.voted = self.all_in = self.folded = False
 
     # def next_bet_round(self) -> None:
         # self.curr_rnd_bet = 0
-
-    def __repr__(self) -> str:
-        return str({'Position':self.position, 'Chip Count':self.c_count, 'Name':self.name})
 
     def generate_secret(self) -> str:
         return str(uuid.uuid4())
@@ -75,6 +72,9 @@ class Player:
             return False, 'Bets must be positive integers'
         return True, ''
 
+    def get_paid(self, paycheck:int) -> None:
+        self.c_count += paycheck
+
     def fold(self) -> None:
         self.folded = True
     
@@ -86,8 +86,13 @@ class Player:
         return new_name
 
     def vote(self) -> None:
+        if self.voted == True:
+            raise ValueError('You have already voted')
         self.voted = True
 
 # BUILT IN
     def __hash__(self) -> str:
         return self.channel
+
+    def __repr__(self) -> str:
+        return str({'position':self.position, 'chip count':self.c_count, 'name':self.name})

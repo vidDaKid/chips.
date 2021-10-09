@@ -15,18 +15,23 @@ export function createCall (type, action) {
 			output = {type:'MOVE', position:action.position}
 			break
 
-		case "START":
-			output = {type:"START"}
-			break
-
 		case "BET":
 			output = {type:"BET", bet_size:action.betSize}
 			break
 
-		case "FOLD":
-			output = {type:"FOLD"}
+		// case 'START_CLAIMS':
+			// output = {type:'START_CLAIMS', pot_id:action.potId}
+			// break
+
+		case 'CLAIM_WIN':
+			output = {type:'CLAIM_WIN', pot_id:action.pot_id}
 			break
 
+		case 'VOTE':
+			output = {type:'VOTE', vote:action.vote}
+			break
+
+		// send a message thats {type:action.type}
 		default:
 			output = {type}
 	}

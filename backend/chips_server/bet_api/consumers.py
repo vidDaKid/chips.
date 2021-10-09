@@ -1,9 +1,10 @@
 import json, time, random, math
 from typing import List
+from bet_api.bet import RoundBets
 from collections import defaultdict
 from channels.generic.websocket import AsyncWebsocketConsumer
 from bet_api.game import Game
-from bet_api.tasks import bet_timer
+from bet_api.tasks import bet_timer, pay_winners_timer
 
 ''' TEMPORARY DEBUG VARIABLE '''
 DEBUG = False
@@ -202,6 +203,14 @@ class GameConsumer(AsyncWebsocketConsumer):
                 await self._send_fail_message(f'Must include `vote` in the action')
                 return
             await self.cast_bool_vote(vote)
+        ## Vote for a winner
+        elif action['type']=='VOTE_WINNERS':
+            if not self._has_params(action, ['winners']):
+                await self._send_fail_message('Must include the winner you are voting for')
+                return
+            winners = action['winners']
+            game = self.games[self.game_id]
+            game.table.vote_winners[frozenset(winners)] += 1
         ## Play turn
         elif action['type'] == 'BET':
             if not self._has_params(action, ['bet_size']):
@@ -226,19 +235,39 @@ class GameConsumer(AsyncWebsocketConsumer):
         ## Start a new game--gets everything set up for u (might make this automatic instead)
         elif action['type'] == 'START':
             await self.start_game()
-        ## TEMP DEGBUG SERVER CALLS
-        elif action['type']=='GAME':
-            if DEBUG:
-                await self.send(repr(self.games[self.game_id]))
-            else:
-                await self.send('Must turn on DEBUG to receive these messages')
         elif action['type']=='CLAIM_WIN':
-            game = self.game[self.game_id]
-            game.table.claim_win(self.channel_name)
-        elif action['type']=='POTS':
-            if DEBUG:
-                game = self.games[self.game_id]
-                await self._send_debug_message(str(game.table.pot))
+            game = self.games[self.game_id]
+            if not self._has_params(action, ['pot_id']):
+                await self._send_fail_message('Need pot Id with win claim')
+                return
+            # check if they've already claimed it
+            if self.channel_name in game.table.winners[action['pot_id']]:
+                return
+            game.table.claim_win(self.channel_name, action['pot_id'])
+            player = game.table._get_player_by_channel(self.channel_name)
+            await self.channel_layer.group_send(self.game_id, {
+                'type':'announce_claimed_win',
+                'pot_id':action['pot_id'],
+                'player':player.name
+            })
+        elif action['type']=='PAY_WINNERS':
+            await self.pay_winners()
+        elif action['type']=='START_CLAIMS':
+            if not self._has_params(action, ['pot_id']):
+                await self._send_fail_message('Must have pot_id to start claim process')
+                return
+            pot_id = action['pot_id']
+            await self.start_claims(pot_id)
+        ## TEMP DEGBUG SERVER CALLS
+        # elif action['type']=='GAME':
+            # if DEBUG:
+                # await self.send(repr(self.games[self.game_id]))
+            # else:
+                # await self.send('Must turn on DEBUG to receive these messages')
+        # elif action['type']=='POTS':
+            # if DEBUG:
+                # game = self.games[self.game_id]
+                # await self._send_debug_message(str(game.table.pot))
         # elif action['type']=='TEST_COUNTDOWN':
             # await bet_timer.apply_async((game_id=self.game_id,), countdown=10)
             # self.bet_timer.apply_async((self.game_id,), countdown=5)
@@ -301,6 +330,14 @@ class GameConsumer(AsyncWebsocketConsumer):
     ## Betting
     async def start_game(self) -> None:
         game = self.games[self.game_id]
+        try:
+            player = game.table._get_player_by_channel(self.channel_name)
+        except KeyError:
+            await self._send_fail_message('Must be in game to start it')
+            return
+        if game.table.players == []:
+            await self._send_fail_message('There are no players in the game')
+            return
         # Get the positions & start the round
         positions:dict[str and 'Player'] = game.table.start_round()
         # start_round should add a player & we can tell everyone whos turn it is
@@ -319,9 +356,14 @@ class GameConsumer(AsyncWebsocketConsumer):
         # bb = positions['big_blind'].name
         for position, player in positions.items():
             positions[position] = player.name
+        # get the dealer player object from the table
+        dealer = game.table.players[game.table.dealer]
         await self.channel_layer.group_send(
             self.game_id, 
-            { 'type': 'announce_new_round' }
+            {
+                'type': 'announce_new_round' ,
+                'dealer': dealer.name
+            }
         )
         await self.channel_layer.group_send(
             self.game_id,
@@ -361,6 +403,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         if new_round:
             # get the elibile pot winners from the table and send it to everyone
             await self.decide_winners()
+            return
             # await self.channel_layer.group_send(self.game_id, {'type':'announce_decide_winner'})
             # time.sleep(5)
             # if game.table.winners == []:
@@ -403,16 +446,75 @@ class GameConsumer(AsyncWebsocketConsumer):
         game.table.timer.revoke()
         # await self.send(str(game.table.timer))
 
+    # First function called at the end of the round
     async def decide_winners(self) -> None:
+        # winner_timer.apply_async((self.game_id,), countdown=10)
         game = self.games[self.game_id]
-        poss_winners = game.table.get_eligible_winners()
+        # poss_winners = game.table.get_eligible_winners()
+        ## Add bets from the round to the pot in case u havent
+        bet = RoundBets()
+        for player in game.table.players:
+            bet.add_bet_from_player(player)
+            player.curr_bet = 0
+        game.table.pot += bet
+        game.table.reset_bet_round()
+        # poss_winners = list()
+        game.table.reset_winners()
+        eligible_players = [x.name for x in game.table.players if not (x.folded or x.all_in)]
+        channel_conversion = {x.channel:x.name for x in game.table.players if not x.folded}
+        pots = game.table.pot.get_json_pots(eligible_players, channel_conversion)
+        # for idx, x in enumerate(pots[:-1]):
+            # pots[idx]['eligible'] = [game.table._get_player_by_channel(y) for y in x['eligible']]
         await self.channel_layer.group_send(
             self.game_id,
             {
-                'type': 'announce_decide_winner',
-                'options': poss_winners
+                'type':'announce_pots',
+                'pots': pots
             }
         )
+        return
+
+
+        # if game.table.pot.bottomless_pot.paid_out:
+            # # if game.table.pot.pots == []:
+                # # return
+            # for idx, p in enumerate(game.table.pot.pots):
+                # if not p.paid_out:
+                    # poss_winners = list(p.eligible)
+                    # pot_amount = p.val
+                    # pot_id = idx
+                    # break
+        # else:
+            # poss_winners = [x for x in game.table.players if not (x.folded or x.all_in)]
+            # pot_amount = game.table.pot.bottomless_pot.val
+            # pot_id = -1
+# 
+        # if poss_winners == []:
+            # # tell the client that all the winners have been paid
+            # await self.channel_layer.group_send(
+                # self.game_id, 
+                # {'type':'announce_paid_out'}
+            # )
+            # return
+        # # start the timer to decide more winners
+        # else:
+            # # Start the timer w this info
+            # game.table.timer = self.start_winner_timer(pot_amount=pot_amount, pot_id=pot_id)
+        # await self.channel_layer.group_send(
+            # self.game_id,
+            # {
+                # 'type': 'announce_decide_winners',
+                # 'options': [x.name for x in poss_winners]
+            # }
+        # )
+
+    async def pay_winners(self) -> None:
+        game = self.games[self.game_id]
+        game.table.reset_voting()
+        await self.channel_layer.group_send(self.game_id, {
+            'type':'announce_vote_pay'
+        })
+        game.table.timer = pay_winners_timer.apply_async(kwargs={'game_id':self.game_id}, countdown=5)
 
     async def new_bet_round(self) -> None:
         game = self.games[self.game_id]
@@ -431,6 +533,89 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'owed': game.table.amount_owed()
             }
         )
+
+    # async def start_claims(self, pot_id) -> None:
+        # game = self.games[self.game_id]
+        # game.table.reset_winners()
+        # await self.channel_layer.group_send(
+            # self.game_id,
+           # { 'type':'announce_start_claims' }
+        # )
+        # game.table.timer = winner_timer.apply_async((self.game_id, pot_id), countdown=10)
+
+    # def start_winner_timer(self, vote:bool=False, *args, **kwargs) -> 'Timer':
+        # game = self.games[self.game_id]
+        # pot_amount = kwargs['pot_amount']
+        # pot_id = kwargs['pot_id']
+        # if vote:
+            # timer = vote_winner_timer.apply_async((self.game_id, pot_amount, pot_id), countdown=10)
+        # else:
+            # timer = winner_timer.apply_async((self.game_id,pot_amount,pot_id), countdown=10)
+        # return timer
+
+    # returns bool saying whether or not ppl were paid
+    # async def pay_winners(self, pot_amount:int, pot_id:int) -> bool:
+        # game = self.games[self.game_id]
+        # 
+        # if game.table.winners == []:
+            # if game.table.players[0].channel != self.channel_name:
+                # return False
+            # game.table.timer = self.start_winner_timer(vote=True, pot_amount=pot_amount, pot_id=pot_id)
+            # await self.channel_layer.group_send(self.game_id, {
+                # 'type':'announce_vote_winners',
+                # 'pot_amount': pot_amount,
+                # 'pot_id':pot_id
+            # })
+            # return False
+# 
+        # for player in game.table.players:
+            # if player.channel == self.channel_name and player in game.table.winners:
+                # player.c_count += ( pot_amount // len(game.table.winners) )
+                # break
+                # # if ur the first person to claim winnings u get the extras in the pot
+                # if player == game.table.winners[0]:
+                    # player.c_count += ( pot_amount % len(game.table.winners) )
+        # # update the pot if not done
+        # if pot_id == -1:
+            # if not game.table.pot.bottomless_pot.paid_out:
+                # game.table.pot.bottomless_pot.paid_out = True
+        # else:
+            # if not game.table.pot.pots[pot_id].paid_out:
+                # game.table.pot.pots[pot_id].paid_out = True
+        # return True
+
+    # returns bool of whether or not players were paid out
+    # async def pay_voted_winners(self, pot_amount:int, pot_id:int) -> bool:
+        # game = self.games[self.game_id]
+        # 
+        # if game.table.vote_winners == {}:
+            # winners = None
+        # else:
+            # winners = max(game.table.vote_winners, key=game.table.vote_winners.get)
+            # me = game.table._get_player_by_channel(self.channel_name)
+        # 
+        # if (not winners) or game.table.vote_winners[winners] == 0:
+            # self.start_winner_timer(vote=True, pot_amount=pot_amount, pot_id=pot_id)
+            # await self.channel_layer.group_send(self.game_id, {
+                # 'type': 'announce_vote_winners',
+                # 'pot_amount': pot_amount,
+                # 'pot_id': pot_id
+            # })
+            # return False, []
+# 
+        # for player in winners:
+            # if player == me.name:
+                # player.c_count += (pot_amount // len(winners))
+                # if player == game.table.winners[0]:
+                    # player.c_count += ( pot_amount % len(winners) )
+# 
+        # if pot_id == -1:
+            # if not game.table.pot.bottomless_pot.paid_out:
+                # game.table.pot.bottomless_pot.paid_out = True
+        # else:
+            # if not game.table.pot.pots[pot_id].paid_out:
+                # game.table.pot.pots[pot_id].paid_out = True
+        # return True, winners
 
     # async def play(self, play:str, game_id:str, bet_size:int=None):
         # if not self._game_exists(game_id):
@@ -630,9 +815,9 @@ class GameConsumer(AsyncWebsocketConsumer):
         # Get current game
         game = self.games[self.game_id]
         # Make sure voting is active by checking the status
-        if not game.voting:
-            await self._send_fail_message('No current voting process')
-            return
+        # if not game.voting:
+            # await self._send_fail_message('No current voting process')
+            # return
         # Add vote to game
         try:
             game.table.cast_bool_vote(channel=self.channel_name, vote=vote)
@@ -823,7 +1008,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.send(json.dumps({'type':'TO_PLAY','player':event['player'], 'owed':event['owed']}))
 
     async def announce_new_round(self, event:dict[str]):
-        await self.send(json.dumps({'type':'NEW_ROUND'}))
+        await self.send(json.dumps({
+            'type':'NEW_ROUND',
+            'dealer': event['dealer']
+        }))
 
     async def announce_new_bet_round(self, event:dict[str]):
         bet_rounds = {1:'flop',2:'turn',3:'river'}
@@ -856,17 +1044,96 @@ class GameConsumer(AsyncWebsocketConsumer):
                 'pot':event['pot']
             }))
 
-    async def announce_decide_winner(self, event:dict[str]):
+    async def announce_decide_winners(self, event:dict[str]):
         await self.send(json.dumps({
-            'type': 'DECIDE_WINNER',
+            'type': 'DECIDE_WINNERS',
             'options': event['options'],
         }))
-
-    async def announce_vote_winners(self, event:dict[str]):
-        await self.send(json.dumps({'type':'VOTE_WINNER'}))
-
+    
     async def announce_winners(self, event:dict[str]):
-        await self.send(json.dumps({'type':'WINNERS', 'winners':event['winners']}))
+        game = self.games[self.game_id]
+        if max(game.table.vote_count, key=game.table.vote_count.get)==False or game.table.vote_count[True]==0:
+            await self.send(json.dumps({'type':'FAILED_VOTE'}))
+            return
+        await self.send(json.dumps({'type':'END_VOTE'}))
+        await self.send(json.dumps({
+            'type':'ANNOUNCE_WINNERS',
+            'event':str(event)
+        }))
+        if self.channel_name == game.table.players[0].channel:
+            game.table.pay_winners()
+            await self.channel_layer.group_send(self.game_id, {
+                'type':'announce_pay_out'
+            })
+
+    async def announce_pay_out(self, event:dict[str]):
+        game = self.games[self.game_id]
+        await self.send(json.dumps({'type':'PAY_OUT', 'players':[{'player':x.name,'c_count':x.c_count} for x in game.table.players]}))
+
+    async def announce_vote_pay(self, event:dict[str]):
+        game = self.games[self.game_id]
+        serializable_winners = game.table.get_serializable_winners()
+        await self.send(json.dumps({
+            'type':'VOTE_PAY',
+            'options': game.table.get_serializable_winners()
+        }))
+        
+    async def announce_claimed_win(self, event:dict[str]):
+        await self.send(json.dumps({
+            'type': 'CLAIMED_WIN',
+            'pot_id': event['pot_id'],
+            'player': event['player']
+        }))
+
+    # async def announce_vote_winners(self, event:dict[str]):
+        # game = self.games[self.game_id]
+        # _, pot_amount, pot_id = event.values()
+        # if pot_id == -1:
+            # eligible = [x for x in game.table.players if not (x.folded or x.all_in)]
+        # else:
+            # eligible = [x for x in game.table.pot.pots[pot_id].eligible if not x.folded]
+        # await self.send(json.dumps({'type':'VOTE_WINNERS', 'eligible':str(eligible)}))
+
+    # async def announce_winners(self, event:dict[str]):
+        # paid_out = await self.pay_winners(pot_amount=event['pot_amount'], pot_id=event['pot_id'])
+        # if not paid_out:
+            # return
+        # game = self.games[self.game_id]
+        # for winner in game.table.winners:
+            # await self.send(json.dumps({
+                    # 'type':'WINNER',
+                    # 'player':winner.name,
+                    # 'amount':event['pot_amount']//len(game.table.winners),
+            # }))
+        # # The first winner should call for the next winner to be decided
+        # if self.channel_name == game.table.winners[0].channel:
+            # await self.decide_winners()
+        # # await self.send(json.dumps({'type':'WINNERS', 'winners':str(game.table.winners)}))
+
+    # async def announce_voted_winners(self, event:dict[str]):
+        # paid_out, winners = await self.pay_voted_winners(pot_amount=event['pot_amount'], pot_id=event['pot_id'])
+        # if not paid_out:
+            # return
+        # for winner in winners:
+            # await self.send(json.dumps({
+                    # 'type':'WINNER',
+                    # 'player': winner,
+                    # 'amount': event['pot_amount'] // len(winners)
+            # }))
+
+    # async def announce_paid_out(self, event:dict[str]):
+        # await self.send(json.dumps({'type':'PAID_OUT'}))
+
+    async def announce_pots(self, event:dict[str]):
+        await self.send(json.dumps({
+            'type': 'POTS',
+            'pots': event['pots']
+        }))
+
+    # async def announce_start_claims(self, event:dict[str]):
+        # await self.send(json.dumps({
+            # 'type': 'START_CLAIMS'
+        # }))
 
     async def announce_settings(self):
         game = self.games[self.game_id]
@@ -875,8 +1142,9 @@ class GameConsumer(AsyncWebsocketConsumer):
             'settings': game.table.settings
         }))
 
-    async def announce_time_up(self, event):
-        await self.send(json.dumps({'type':'TIME_UP'}))
+    # async def announce_time_up(self, event):
+        # await self.send(json.dumps({'type':'TIME_UP'}))
+    
 
     ''' USEFUL FUNCTIONS '''
     def _verify_player_in_game(self):

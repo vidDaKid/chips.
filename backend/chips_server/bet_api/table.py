@@ -3,10 +3,11 @@ TABLE
 holds all the information for each table (i.e. a list of players in a game)
 '''
 import random
+from collections import defaultdict
+from typing import Optional, List
 from bet_api.player import Player
 from bet_api.bet import Bet, RoundBets
 from bet_api.pot import Pots
-from typing import Optional, List
 
 class Table:
     def __init__(self):
@@ -23,8 +24,11 @@ class Table:
         # @var pot // Holds all the pot state
         self.pot = Pots()
 
+        # @var curr_pot_id // to go thru the pots 1 by 1 for claiming
+        self.curr_pot_id = 0
+
         # store the winners for the round temporarily
-        self.winners = list()
+        self.winners = defaultdict(set)
 
         # @var bet_round // Tracks the current round we're in
         self.bet_round:int = 0 # 0->4 == pre_flop -> river
@@ -37,8 +41,11 @@ class Table:
 
         # keep track of ordering count
         self.count = 0
+
         # @var vote_count // storing votes from each player (anonymously)
         self.vote_count = {True:0,False:0} # False=reject, True=accept
+        # @var vote_winner // vote for winner / winners
+        self.vote_winners = defaultdict(int)
 
         # @var min_raise // holds the smallest amount a player can raise by
         self.min_raise_set:bool = False
@@ -50,14 +57,15 @@ class Table:
         self.first_bet:bool = False
         # @var last_raise // the last person to raise the bet (round ends before them)
         self.last_raise:Player = None
+        # @var need_last_raise // if the last raise goes all in the next person to not all in is last raise
+        self.need_last_raise:bool = False
         # @var curr_player // the player who is up to play
         self.curr_player:Player = None
 
     # RESET FUNCTIONS
     def reset_bet_round(self) -> None:
-        self.first_bet = False
+        self.min_raise_set = self.first_bet = False
         self.last_raise = self.curr_player = None
-        self.min_raise_set = False
         self.min_raise = self.curr_bet = 0
         ## Reset player counts
         for player in self.players:
@@ -72,10 +80,13 @@ class Table:
         self.pot = Pots()
         ## Reset players
         for player in self.players:
-            self.folded = False
-            self.all_in = False
+            player.reset_round()
         ## Iterate starting dealer
         self.dealer = self._get_future_index(1)
+        self.reset_winners()
+
+    def reset_winners(self) -> None:
+        self.winners = defaultdict(set)
 
     # BET FUNCTIONS
     def place_bet(self, channel:str, bet_size:int) -> dict[str] and str:
@@ -88,7 +99,7 @@ class Table:
         if not valid:
             raise ValueError(err_msg)
 
-        if bet_size < (o:=self.amount_owed(channel)):
+        if bet_size < (o:=self.amount_owed(channel)) and bet_size != player.c_count:
             raise ValueError(f'Error! You must bet at least {o}')
 
         # Check for raise
@@ -102,11 +113,18 @@ class Table:
                 raise ValueError(f'Raises must be at least {self.curr_bet} over the current bet')
             # update new current bet and new last raiser
             self.curr_bet = total_bet
-            self.last_raise = player
+            if player.c_count == bet_size:
+                self.need_last_raise = True
+            else:
+                self.last_raise = player
             # Update the min_raise if no one has set it yet
             if ( not self.min_raise_set ) and ( bet_size > 0 ):
                 self.min_raise = bet_size
                 self.min_raise_set = True
+
+        if self.need_last_raise:
+            self.last_raise = player
+            self.need_last_raise = False
 
         if not self.first_bet:
             self.first_bet = True
@@ -126,7 +144,7 @@ class Table:
         if self.check_if_new_bet_round():
             next_round:bool = self.next_bet_round()
             if next_round:
-                return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, False, True
+                return {'player':player.name, 'bet_size':bet_size}, '', False, True
             return {'player':player.name, 'bet_size':bet_size}, self.curr_player.name, True, False
 
         # move to the next better and send it to the consumer
@@ -180,6 +198,7 @@ class Table:
         # Since the st_player is dealer, we need the player 3 after in order to start after BB
         ## Order players
         self.order_players()
+        self.reset_round()
         ## Get the starting player
         st_player = self.players[self.dealer]
         ## Make a queue starting from the 3rd player after the starting player (excluding blinds)
@@ -255,7 +274,7 @@ class Table:
         # Check for new round
         if self.bet_round == 3:
             # NEW ROUND #
-            self.reset_round()
+            # self.reset_round()
             # self.create_queue()
             return True
         # Advance bet round state
@@ -273,12 +292,34 @@ class Table:
             # output[player.name] = player.curr_bet
         # return output
 
-    def claim_win(self, channel:str) -> None:
+    def claim_win(self, channel:str, pot_id:int) -> None:
         player = self._get_player_by_channel(channel)
         if player.folded:
             return
         # self.winners.append({'player':player.player, 'amount':0})
-        self.winners.append(player)
+        # self.winners.append(player)
+        self.winners[pot_id].add(channel)
+
+    def pay_winners(self) -> None:
+        if self.pot.bottomless_pot.val != 0:
+            bottomless_winners = [self._get_player_by_channel(x) for x in self.winners[-1]]
+            gains = self.pot.bottomless_pot.val // len(bottomless_winners)
+            bottomless_winners[0].get_paid(self.pot.bottomless_pot.val % len(bottomless_winners))
+            for player in bottomless_winners:
+                player.get_paid(gains)
+        for pot in self.pot.pots:
+            pot_winners = [self._get_player_by_channel(x) for x in pot.eligible]
+            gains = pot.val // len(pot_winners)
+            pot_winners[0].get_paid(pot.val % len(pot_winners))
+            for player in pot_winners:
+                player.get_paid(gains)
+
+    def get_serializable_winners(self) -> dict[int and str]:
+        # idk y i did this in one line but it felt natural
+        # all it does is convert the sets into lists & the channel values into their names
+        output = {x:[self._get_player_by_channel(z).name for z in y] for x,y in self.winners.items()}
+        return output
+                    
     
     def get_eligible_winners(self) -> List[tuple[str]]:
         possible_winners = self.pot.get_eligible_winners()
@@ -473,6 +514,12 @@ class Table:
                 return player
         raise KeyError('The player you are looking for is not at this table')
 
+    # def get_player_by_name(self, name:str) -> Player:
+        # for player in self.players:
+            # if player.name == name:
+                # return player
+        # raise KeyError('There is no player by that name at this table')
+
     @property
     def total_players(self) -> int:
         return len(self.players)
@@ -483,3 +530,6 @@ class Table:
         for player in self.players:
             output += f'\n\t{player.name}:[{player.c_count=},{player.position=}]'
         return output
+
+    def __hash__(self) -> set:
+        return set(self.winners)
